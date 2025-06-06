@@ -1,5 +1,4 @@
-aiogram
-openai
-python-dotenv
-pydantic-settings
-ffmpeg-python
+aiogram 3.20.0
+openai 1.84.0
+python-dotenv 1.1.0
+pydantic-settings 2.9.1
