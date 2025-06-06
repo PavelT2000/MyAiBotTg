@@ -1,8 +1,9 @@
 import os
 import logging
+import asyncio
 from io import BytesIO
 
-from aiogram import Bot, Dispatcher, types
+from aiogram import Bot, Dispatcher, types, F
 from aiogram.filters import Command
 from aiogram.types import Message
 from aiogram.utils.keyboard import ReplyKeyboardBuilder
@@ -37,16 +38,17 @@ async def start_handler(message: Message):
     )
     await message.answer(welcome_text, reply_markup=get_main_keyboard())
 
-# Обработчик текстовых сообщений
-@dp.message()
+# Обработчик текстовых сообщений (только текст)
+@dp.message(F.text)
 async def text_handler(message: Message):
-    if message.text.lower() == "помощь":
+    text = message.text.lower()
+    if text == "помощь":
         help_text = (
             "Просто отправь мне голосовое сообщение с вопросом, "
             "и я постараюсь на него ответить!"
         )
         await message.answer(help_text)
-    elif message.text.lower() == "о боте":
+    elif text == "о боте":
         about_text = (
             "Я - голосовой ассистент на базе OpenAI.\n"
             "Могу отвечать на вопросы и озвучивать ответы."
@@ -56,7 +58,7 @@ async def text_handler(message: Message):
         await message.answer("Пожалуйста, используйте голосовые сообщения для вопросов.")
 
 # Обработчик голосовых сообщений
-@dp.message(lambda message: message.voice is not None)
+@dp.message(F.voice)
 async def voice_handler(message: Message):
     try:
         # Скачиваем голосовое сообщение
@@ -89,13 +91,18 @@ async def voice_handler(message: Message):
         
         # Сохраняем аудио во временный файл и отправляем пользователю
         speech_bytes = BytesIO(await speech_response.aread())
-        await message.answer_voice(types.BufferedInputFile(speech_bytes.getvalue(), "response.mp3"))
+        await message.answer_voice(
+            types.BufferedInputFile(
+                speech_bytes.getvalue(), 
+                filename="response.mp3"
+            )
+        )
         
         # Также отправляем текстовый ответ
         await message.answer(f"🤖 Ответ: {assistant_response}")
         
     except Exception as e:
-        logger.error(f"Error processing voice message: {e}")
+        logger.error(f"Error processing voice message: {e}", exc_info=True)
         await message.answer("Произошла ошибка при обработке вашего сообщения. Попробуйте позже.")
 
 async def get_assistant_response(question: str) -> str:
@@ -129,13 +136,15 @@ async def get_assistant_response(question: str) -> str:
     messages = await client.beta.threads.messages.list(thread_id=thread.id)
     assistant_messages = [msg for msg in messages.data if msg.role == "assistant"]
     
-    if assistant_messages:
-        return assistant_messages[0].content[0].text.value
-    return "Извините, не удалось получить ответ."
+    return assistant_messages[0].content[0].text.value if assistant_messages else "Извините, не удалось получить ответ."
+
+# Обработчик всех остальных типов сообщений
+@dp.message()
+async def other_types_handler(message: Message):
+    await message.answer("Я работаю только с текстовыми и голосовыми сообщениями")
 
 async def main():
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
-    import asyncio
     asyncio.run(main())
