@@ -8,22 +8,11 @@ from aiogram import Bot, Dispatcher, types, F
 from aiogram.filters import Command
 from aiogram.types import Message
 from aiogram.utils.keyboard import ReplyKeyboardBuilder
-from pydantic_settings import BaseSettings
-
 import openai
 
-# Конфигурация через Pydantic (строго по ТЗ)
-class Settings(BaseSettings):
-    OPENAI_API_KEY: str
-    TELEGRAM_BOT_TOKEN: str
-    ASSISTANT_ID: str
-    
-    class Config:
-        env_file = ".env"
+from config import config  # Импорт конфигурации из config.py
 
-config = Settings()
-
-# Инициализация клиента OpenAI (асинхронный, как требуется)
+# Инициализация клиента OpenAI
 client = openai.AsyncOpenAI(api_key=config.OPENAI_API_KEY)
 
 # Инициализация бота
@@ -33,6 +22,39 @@ dp = Dispatcher()
 # Логирование
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+# Функция для создания ассистента
+async def create_assistant():
+    try:
+        assistant = await client.beta.assistants.create(
+            name="Voice Assistant",
+            instructions="Вы полезный голосовой ассистент, отвечающий на вопросы пользователей кратко и по делу.",
+            model="gpt-4o",
+            tools=[{"type": "code_interpreter"}]  # Опционально
+        )
+        logger.info(f"Создан новый ассистент с ID: {assistant.id}")
+        print(f"!!! ВАЖНО: Добавьте в .env следующий ASSISTANT_ID: {assistant.id}")
+        return assistant.id
+    except Exception as e:
+        logger.error(f"Ошибка при создании ассистента: {e}")
+        raise
+
+# Проверка и создание ассистента, если ID недействителен
+async def verify_or_create_assistant():
+    try:
+        assistant = await client.beta.assistants.retrieve(config.ASSISTANT_ID)
+        logger.info(f"Ассистент найден: {assistant.name}")
+        return config.ASSISTANT_ID
+    except openai.NotFoundError:
+        logger.warning(f"Ассистент с ID {config.ASSISTANT_ID} не найден. Создаём новый...")
+        new_assistant_id = await create_assistant()
+        # Обновляем config.ASSISTANT_ID (но .env нужно обновить вручную)
+        config.ASSISTANT_ID = new_assistant_id
+        logger.info(f"Используется новый ASSISTANT_ID: {new_assistant_id}")
+        return new_assistant_id
+    except Exception as e:
+        logger.error(f"Ошибка при проверке ассистента: {e}")
+        raise
 
 # Клавиатура
 def get_main_keyboard():
@@ -117,10 +139,12 @@ async def voice_handler(message: Message):
         await message.answer(f"🤖 Ответ: {assistant_response}")
 
     except Exception as e:
-        logger.error(f"Error: {e}", exc_info=True)
+        logger.error(f"Ошибка: {e}", exc_info=True)
         await message.answer("Ошибка обработки запроса")
 
 async def main():
+    # Проверяем или создаём ассистента перед запуском бота
+    await verify_or_create_assistant()
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
