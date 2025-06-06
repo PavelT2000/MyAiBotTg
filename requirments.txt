@@ -1,5 +1,5 @@
-aiogram==3.0.0b7
-openai==1.12.0
-python-dotenv==1.0.0
-pydantic-settings==2.0.3
-ffmpeg-python==0.2.0
+aiogram
+openai
+python-dotenv
+pydantic-settings
+ffmpeg-python
