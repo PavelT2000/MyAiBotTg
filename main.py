@@ -29,7 +29,7 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # Инициализация базы данных
-engine = create_async_engine(config.DATABASE_URL, echo=True)
+engine = create_async_engine(config.DATABASE_URL, echo=True, connect_args={"server_settings": {"application_name": "voice_values_bot"}})
 async_session = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 
 # Функция для создания ассистента
