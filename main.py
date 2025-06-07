@@ -185,6 +185,7 @@ async def values_handler(message: Message, state: FSMContext):
 
 @dp.message(ValuesState.waiting_for_value, F.text | F.voice)
 async def process_value(message: Message, state: FSMContext):
+    logger.info(f"Обработка в ValuesState.waiting_for_value, сообщение: {message.text or 'голосовое'}")
     try:
         user_question = ""
         if message.voice:
