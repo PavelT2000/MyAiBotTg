@@ -164,6 +164,12 @@ async def start_handler(message: Message):
         "Привет! Отправь голосовое сообщение, и я отвечу голосом! Используй /values, чтобы обсудить твои ценности.",
         reply_markup=get_main_keyboard()
     )
+@dp.message(Command("values"))
+async def values_handler(message: Message, state: FSMContext):
+    await state.set_state(ValuesState.waiting_for_value)
+    thread = await client.beta.threads.create()
+    await state.update_data(thread_id=thread.id)
+    await message.answer("Что для тебя наиболее важно в жизни? Назови одну ценность или опиши, что ты ценишь.")
 
 @dp.message(F.text)
 async def text_handler(message: Message, state: FSMContext):
@@ -176,12 +182,6 @@ async def text_handler(message: Message, state: FSMContext):
     else:
         await message.answer("Используй голосовые сообщения или /values.")
 
-@dp.message(Command("values"))
-async def values_handler(message: Message, state: FSMContext):
-    await state.set_state(ValuesState.waiting_for_value)
-    thread = await client.beta.threads.create()
-    await state.update_data(thread_id=thread.id)
-    await message.answer("Что для тебя наиболее важно в жизни? Назови одну ценность или опиши, что ты ценишь.")
 
 @dp.message(ValuesState.waiting_for_value, F.text | F.voice)
 async def process_value(message: Message, state: FSMContext):
