@@ -254,10 +254,19 @@ async def text_handler(message: Message, state: FSMContext):
     elif message.text.lower() == "о боте":
         await message.answer("Я голосовой ассистент на OpenAI API с функцией определения ценностей.")
     elif message.text.lower() == "мои ценности":
-        await message.answer("Начнём определять твои ценности! Используй /values.")
+        async with async_session() as session:
+            result = await session.execute(
+                "SELECT value FROM user_values WHERE user_id = :user_id",
+                {"user_id": message.from_user.id}
+            )
+            values = result.fetchall()
+            if values:
+                values_list = [row[0] for row in values]
+                await message.answer(f"Ваши сохранённые ценности: {', '.join(values_list)}")
+            else:
+                await message.answer("У вас пока нет сохранённых ценностей. Используйте /values, чтобы определить их.")
     else:
         await message.answer("Используй голосовые сообщения или /values.")
-
 
 @dp.message(F.voice)
 async def voice_handler(message: Message):
