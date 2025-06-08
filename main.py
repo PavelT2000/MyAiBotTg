@@ -177,18 +177,6 @@ async def values_handler(message: Message, state: FSMContext):
     await state.update_data(thread_id=thread.id)
     await message.answer("Что для тебя наиболее важно в жизни? Назови одну ценность или опиши, что ты ценишь.")
 
-@dp.message(F.text)
-async def text_handler(message: Message, state: FSMContext):
-    logger.info("text handler used")
-    if message.text.lower() == "помощь":
-        await message.answer("Отправь голосовое сообщение или используй /values для определения ценностей.")
-    elif message.text.lower() == "о боте":
-        await message.answer("Я голосовой ассистент на OpenAI API с функцией определения ценностей.")
-    elif message.text.lower() == "мои ценности":
-        await message.answer("Начнём определять твои ценности! Используй /values.")
-    else:
-        await message.answer("Используй голосовые сообщения или /values.")
-
 
 @dp.message(ValuesState.waiting_for_value, F.text | F.voice)
 async def process_value(message: Message, state: FSMContext):
@@ -264,6 +252,23 @@ async def process_value(message: Message, state: FSMContext):
         logger.error(f"Ошибка обработки ценности: {e}", exc_info=True)
         await message.answer("Ошибка обработки. Попробуйте снова.")
         await state.clear()
+
+     
+
+@dp.message(F.text)
+async def text_handler(message: Message, state: FSMContext):
+    logger.info("text handler used")
+    if message.text.lower() == "помощь":
+        await message.answer("Отправь голосовое сообщение или используй /values для определения ценностей.")
+    elif message.text.lower() == "о боте":
+        await message.answer("Я голосовой ассистент на OpenAI API с функцией определения ценностей.")
+    elif message.text.lower() == "мои ценности":
+        await message.answer("Начнём определять твои ценности! Используй /values.")
+    else:
+        await message.answer("Используй голосовые сообщения или /values.")
+
+
+   
 @dp.message(F.voice)
 async def voice_handler(message: Message):
     logger.info("voice handler used")
