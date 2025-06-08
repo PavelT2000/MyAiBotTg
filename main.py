@@ -42,8 +42,8 @@ async def create_assistant():
             instructions="""
             Вы полезный голосовой ассистент. Ваша задача — помогать пользователю определять его ключевые ценности через диалог.
             Начните с вопроса: 'Что для вас наиболее важно в жизни? Назови одну ценность (например, семья, свобода, успех).'
-            Если пользователь даёт неясный или не относящийся к делу ответ (например, 'привет', 'пока', 'не знаю'), продолжайте задавать уточняющие вопросы, такие как: 'Пожалуйста, назовите конкретную ценность, которая для вас важна.'
-            Когда пользователь называет чёткую ценность (например, 'семья', 'свобода', 'успех'), немедленно вызывайте функцию save_value с аргументом value, содержащим эту ценность.
+            Если пользователь говорит 'добавить к ценностям [ценность]' или называет новую ценность, вызывайте save_value с этой ценностью.
+            Если ответ неясен, продолжайте задавать вопросы, такие как: 'Пожалуйста, назовите конкретную ценность.'
             Не вызывайте save_value, если ответ не является валидной ценностью.
             Для голосовых сообщений преобразуйте текст в ответы, используя TTS.
             """,
@@ -256,18 +256,24 @@ async def text_handler(message: Message, state: FSMContext):
         await message.answer("Я голосовой ассистент на OpenAI API с функцией определения ценностей.")
     elif message.text.lower() == "мои ценности":
         async with async_session() as session:
-            result = await session.execute(
-                text("SELECT value FROM user_values WHERE user_id = :user_id"),
-                {"user_id": message.from_user.id}
-            )
-            values = result.fetchall()
-            if values:
-                values_list = [row[0] for row in values]
-                await message.answer(f"Ваши сохранённые ценности: {', '.join(values_list)}")
-            else:
-                await message.answer("У вас пока нет сохранённых ценностей. Используйте /values, чтобы определить их.")
+            try:
+                result = await session.execute(
+                    text("SELECT value FROM user_values WHERE user_id = :user_id"),
+                    {"user_id": message.from_user.id}
+                )
+                values = result.fetchall()
+                logger.info(f"Полученные ценности для user_id {message.from_user.id}: {values}")
+                if values:
+                    values_list = [row[0] for row in values]
+                    await message.answer(f"Ваши сохранённые ценности: {', '.join(values_list)}")
+                else:
+                    await message.answer("У вас пока нет сохранённых ценностей. Используйте /values, чтобы определить их.")
+            except Exception as e:
+                logger.error(f"Ошибка при извлечении ценностей: {e}", exc_info=True)
+                await message.answer("Ошибка при загрузке ваших ценностей. Попробуйте позже.")
     else:
         await message.answer("Используй голосовые сообщения или /values.")
+
 
 @dp.message(F.voice)
 async def voice_handler(message: Message):
