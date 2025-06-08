@@ -93,49 +93,32 @@ async def verify_or_create_assistant():
 
 # Валидация ценности через Completions API с functools
 @lru_cache(maxsize=100)
-def validate_value_cached(value: str) -> bool:
+async def validate_value_cached(value: str) -> bool:
     logger.info("validate value used")
     try:
         if not value or not isinstance(value, str) or len(value.strip()) == 0:
             return False
-        response = client.chat.completions.create(
+        response = await client.chat.completions.create(
             model="gpt-4o-mini",
             messages=[
-                {"role": "system", "content": "Вы валидатор ценностей. Проверьте, является ли переданная строка корректной ценностью (например, 'семья', 'свобода', 'успех'). Она не должна быть пустой, бессмысленной или содержать бред. Верните только boolean."},
+                {"role": "system", "content": "Вы валидатор ценностей. Верните 'true' для корректных ценностей (например, 'семья', 'свобода', 'успех'), и 'false' для некорректных (пустые, бессмысленные или бред). Ответьте только 'true' или 'false'."},
                 {"role": "user", "content": value}
             ],
-            functions=[
-                {
-                    "name": "validate_value",
-                    "description": "Валидирует ценность и возвращает boolean",
-                    "parameters": {
-                        "type": "object",
-                        "properties": {
-                            "is_valid": {
-                                "type": "boolean",
-                                "description": "True, если ценность корректна, False — если нет"
-                            }
-                        },
-                        "required": ["is_valid"]
-                    }
-                }
-            ],
-            function_call={"name": "validate_value"}
+            max_tokens=1
         )
-        import json
-        result = json.loads(response.choices[0].message.function_call.arguments)
-        return result["is_valid"]
+        is_valid = response.choices[0].message.content.strip().lower() == "true"
+        logger.info(f"Валидация ценности '{value}': {is_valid}")
+        return is_valid
     except Exception as e:
         logger.error(f"Ошибка валидации ценности: {e}")
         return False
 
-# Сохранение ценности в базе данных
 async def save_value(user_id: int, value: str):
     logger.info("save value used")
     async with async_session() as session:
         async with session.begin():
             try:
-                is_valid = validate_value_cached(value)
+                is_valid = await validate_value_cached(value)  # Ожидаем результат асинхронной функции
                 if not is_valid:
                     logger.warning(f"Некорректная ценность: {value}")
                     return False, "Ценность некорректна. Пожалуйста, уточните, что вы имеете в виду."
