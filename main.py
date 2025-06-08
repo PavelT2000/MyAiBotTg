@@ -192,8 +192,6 @@ async def text_handler(message: Message, state: FSMContext):
 
 @dp.message(ValuesState.waiting_for_value, F.text | F.voice)
 async def process_value(message: Message, state: FSMContext):
-    logger.info("process value used")
-    logger.info(f"Обработка в ValuesState.waiting_for_value, сообщение: {message.text or 'голосовое'}")
     try:
         user_question = ""
         if message.voice:
@@ -204,6 +202,7 @@ async def process_value(message: Message, state: FSMContext):
                 model="whisper-1"
             )
             user_question = transcript.text
+            logger.info(f"Транскрипция голосового сообщения: {user_question}")
             await message.answer(f"🎤 Ваш ответ: {user_question}")
         else:
             user_question = message.text
@@ -229,16 +228,21 @@ async def process_value(message: Message, state: FSMContext):
         for msg in messages.data:
             if msg.role == "assistant" and msg.content[0].type == "text":
                 assistant_response = msg.content[0].text.value
+                logger.info(f"Ответ ассистента: {assistant_response}")
                 await message.answer(assistant_response)
 
                 # Проверка вызова функции save_value
                 if run.required_action and run.required_action.submit_tool_outputs:
+                    logger.info(f"Требуется действие: {run.required_action.submit_tool_outputs.tool_calls}")
                     for tool_call in run.required_action.submit_tool_outputs.tool_calls:
                         if tool_call.function.name == "save_value":
+                            logger.info(f"Вызов save_value с аргументами: {tool_call.function.arguments}")
                             import json
                             arguments = json.loads(tool_call.function.arguments)
                             value = arguments.get("value")
+                            logger.info(f"Извлечённая ценность: {value}")
                             success, response = await save_value(message.from_user.id, value)
+                            logger.info(f"Результат save_value: success={success}, response={response}")
                             await client.beta.threads.runs.submit_tool_outputs(
                                 thread_id=thread_id,
                                 run_id=run.id,
@@ -260,7 +264,6 @@ async def process_value(message: Message, state: FSMContext):
         logger.error(f"Ошибка обработки ценности: {e}", exc_info=True)
         await message.answer("Ошибка обработки. Попробуйте снова.")
         await state.clear()
-
 @dp.message(F.voice)
 async def voice_handler(message: Message):
     logger.info("voice handler used")
