@@ -34,6 +34,7 @@ async_session = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit
 
 # Функция для создания ассистента
 async def create_assistant():
+    logger.info("create assistant used")
     try:
         assistant = await client.beta.assistants.create(
             name="Voice and Values Assistant",
@@ -74,6 +75,7 @@ async def create_assistant():
 
 # Проверка и создание ассистента
 async def verify_or_create_assistant():
+    logger.info("verify or create assistant handler used")
     try:
         assistant = await client.beta.assistants.retrieve(config.ASSISTANT_ID)
         logger.info(f"Ассистент найден: {assistant.name}")
@@ -91,6 +93,7 @@ async def verify_or_create_assistant():
 # Валидация ценности через Completions API с functools
 @lru_cache(maxsize=100)
 def validate_value_cached(value: str) -> bool:
+    logger.info("validate value used")
     try:
         if not value or not isinstance(value, str) or len(value.strip()) == 0:
             return False
@@ -127,6 +130,7 @@ def validate_value_cached(value: str) -> bool:
 
 # Сохранение ценности в базе данных
 async def save_value(user_id: int, value: str):
+    logger.info("save value used")
     async with async_session() as session:
         async with session.begin():
             try:
@@ -160,12 +164,14 @@ class ValuesState(StatesGroup):
 # Обработчики сообщений
 @dp.message(Command("start"))
 async def start_handler(message: Message):
+    logger.info("start handler used")
     await message.answer(
         "Привет! Отправь голосовое сообщение, и я отвечу голосом! Используй /values, чтобы обсудить твои ценности.",
         reply_markup=get_main_keyboard()
     )
 @dp.message(Command("values"))
 async def values_handler(message: Message, state: FSMContext):
+    logger.info("values handler used")
     await state.set_state(ValuesState.waiting_for_value)
     thread = await client.beta.threads.create()
     await state.update_data(thread_id=thread.id)
@@ -173,6 +179,7 @@ async def values_handler(message: Message, state: FSMContext):
 
 @dp.message(F.text)
 async def text_handler(message: Message, state: FSMContext):
+    logger.info("text handler used")
     if message.text.lower() == "помощь":
         await message.answer("Отправь голосовое сообщение или используй /values для определения ценностей.")
     elif message.text.lower() == "о боте":
@@ -185,6 +192,7 @@ async def text_handler(message: Message, state: FSMContext):
 
 @dp.message(ValuesState.waiting_for_value, F.text | F.voice)
 async def process_value(message: Message, state: FSMContext):
+    logger.info("process value used")
     logger.info(f"Обработка в ValuesState.waiting_for_value, сообщение: {message.text or 'голосовое'}")
     try:
         user_question = ""
@@ -255,6 +263,7 @@ async def process_value(message: Message, state: FSMContext):
 
 @dp.message(F.voice)
 async def voice_handler(message: Message):
+    logger.info("voice handler used")
     try:
         voice_file = await bot.get_file(message.voice.file_id)
         voice_data = await bot.download_file(voice_file.file_path)
