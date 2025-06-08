@@ -16,6 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sess
 
 from config import config
 from models import Base, UserValue
+from sqlalchemy.sql import text
 
 # Инициализация клиента OpenAI
 client = openai.AsyncOpenAI(api_key=config.OPENAI_API_KEY)
@@ -256,7 +257,7 @@ async def text_handler(message: Message, state: FSMContext):
     elif message.text.lower() == "мои ценности":
         async with async_session() as session:
             result = await session.execute(
-                "SELECT value FROM user_values WHERE user_id = :user_id",
+                text("SELECT value FROM user_values WHERE user_id = :user_id"),
                 {"user_id": message.from_user.id}
             )
             values = result.fetchall()
