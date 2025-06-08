@@ -209,7 +209,42 @@ async def process_value(message: Message, state: FSMContext):
             assistant_id=config.ASSISTANT_ID
         )
 
-        if run.status != "completed":
+        if run.status == "requires_action" and run.required_action and run.required_action.submit_tool_outputs:
+            logger.info(f"Статус requires_action, tool_calls: {run.required_action.submit_tool_outputs.tool_calls}")
+            for tool_call in run.required_action.submit_tool_outputs.tool_calls:
+                if tool_call.function.name == "save_value":
+                    logger.info(f"Вызов save_value с аргументами: {tool_call.function.arguments}")
+                    import json
+                    try:
+                        arguments = json.loads(tool_call.function.arguments)
+                        value = arguments.get("value")
+                        if not value or not isinstance(value, str) or not value.strip():
+                            logger.warning(f"Некорректное значение value: {value}")
+                            await message.answer("Ценность не определена. Пожалуйста, уточните.")
+                            return
+                        logger.info(f"Извлечённая ценность: {value}")
+                        success, response = await save_value(message.from_user.id, value)
+                        logger.info(f"Результат save_value: success={success}, response={response}")
+                        await client.beta.threads.runs.submit_tool_outputs(
+                            thread_id=thread_id,
+                            run_id=run.id,
+                            tool_outputs=[{"tool_call_id": tool_call.id, "output": json.dumps({"success": success, "message": response})}]
+                        )
+                        await message.answer(response)
+                        if success:
+                            await state.clear()
+                        return
+                    except json.JSONDecodeError as e:
+                        logger.error(f"Ошибка декодирования аргументов: {e}")
+                        await message.answer("Ошибка обработки. Попробуйте снова.")
+                        await state.clear()
+                        return
+                    except Exception as e:
+                        logger.error(f"Ошибка при обработке tool_call: {e}", exc_info=True)
+                        await message.answer("Ошибка обработки. Попробуйте снова.")
+                        await state.clear()
+                        return
+        elif run.status != "completed":
             raise Exception(f"Run завершился с ошибкой, статус: {run.status}")
 
         messages = await client.beta.threads.messages.list(thread_id=thread_id)
@@ -219,54 +254,14 @@ async def process_value(message: Message, state: FSMContext):
                 logger.info(f"Ответ ассистента: {assistant_response}")
                 await message.answer(assistant_response)
 
-                # Проверка вызова функции save_value
-                if run.required_action and run.required_action.submit_tool_outputs:
-                    logger.info(f"Требуется действие: {run.required_action.submit_tool_outputs.tool_calls}")
-                    for tool_call in run.required_action.submit_tool_outputs.tool_calls:
-                        if tool_call.function.name == "save_value":
-                            logger.info(f"Вызов save_value с аргументами: {tool_call.function.arguments}")
-                            import json
-                            try:
-                                arguments = json.loads(tool_call.function.arguments)
-                                value = arguments.get("value")
-                                if not value or not isinstance(value, str) or not value.strip():
-                                    logger.warning(f"Некорректное значение value: {value}")
-                                    await message.answer("Ценность не определена. Пожалуйста, уточните.")
-                                    return
-                                logger.info(f"Извлечённая ценность: {value}")
-                                success, response = await save_value(message.from_user.id, value)
-                                logger.info(f"Результат save_value: success={success}, response={response}")
-                                await client.beta.threads.runs.submit_tool_outputs(
-                                    thread_id=thread_id,
-                                    run_id=run.id,
-                                    tool_outputs=[
-                                        {
-                                            "tool_call_id": tool_call.id,
-                                            "output": json.dumps({"success": success, "message": response})
-                                        }
-                                    ]
-                                )
-                                await message.answer(response)
-                                if success:
-                                    await state.clear()
-                                return
-                            except json.JSONDecodeError as e:
-                                logger.error(f"Ошибка декодирования аргументов: {e}")
-                                await message.answer("Ошибка обработки запроса. Попробуйте снова.")
-                                await state.clear()
-                                return
-                            except Exception as e:
-                                logger.error(f"Ошибка при обработке tool_call: {e}", exc_info=True)
-                                await message.answer("Ошибка обработки. Попробуйте снова.")
-                                await state.clear()
-                                return
-
         await message.answer("Пожалуйста, уточните вашу ценность.")
 
     except Exception as e:
         logger.error(f"Ошибка обработки ценности: {e}", exc_info=True)
         await message.answer("Ошибка обработки. Попробуйте снова.")
         await state.clear()
+
+
 
 @dp.message(F.text)
 async def text_handler(message: Message, state: FSMContext):
@@ -281,7 +276,6 @@ async def text_handler(message: Message, state: FSMContext):
         await message.answer("Используй голосовые сообщения или /values.")
 
 
-   
 @dp.message(F.voice)
 async def voice_handler(message: Message):
     logger.info("voice handler used")
@@ -308,15 +302,42 @@ async def voice_handler(message: Message):
             assistant_id=config.ASSISTANT_ID
         )
         
-        if run.status != "completed":
+        if run.status == "requires_action" and run.required_action and run.required_action.submit_tool_outputs:
+            logger.info(f"Статус requires_action, tool_calls: {run.required_action.submit_tool_outputs.tool_calls}")
+            for tool_call in run.required_action.submit_tool_outputs.tool_calls:
+                if tool_call.function.name == "save_value":
+                    logger.info(f"Вызов save_value с аргументами: {tool_call.function.arguments}")
+                    import json
+                    try:
+                        arguments = json.loads(tool_call.function.arguments)
+                        value = arguments.get("value")
+                        if not value or not isinstance(value, str) or not value.strip():
+                            logger.warning(f"Некорректное значение value: {value}")
+                            await message.answer("Ценность не определена. Пожалуйста, уточните.")
+                            return
+                        logger.info(f"Извлечённая ценность: {value}")
+                        success, response = await save_value(message.from_user.id, value)
+                        logger.info(f"Результат save_value: success={success}, response={response}")
+                        await client.beta.threads.runs.submit_tool_outputs(
+                            thread_id=thread.id,
+                            run_id=run.id,
+                            tool_outputs=[{"tool_call_id": tool_call.id, "output": json.dumps({"success": success, "message": response})}]
+                        )
+                        await message.answer(response)
+                        return
+                    except json.JSONDecodeError as e:
+                        logger.error(f"Ошибка декодирования аргументов: {e}")
+                        await message.answer("Ошибка обработки. Попробуйте снова.")
+                        return
+                    except Exception as e:
+                        logger.error(f"Ошибка при обработке tool_call: {e}", exc_info=True)
+                        await message.answer("Ошибка обработки. Попробуйте снова.")
+                        return
+        elif run.status != "completed":
             raise Exception(f"Run завершился с ошибкой, статус: {run.status}")
         
         messages = await client.beta.threads.messages.list(thread_id=thread.id)
-        assistant_response = next(
-            m.content[0].text.value 
-            for m in messages.data 
-            if m.role == "assistant"
-        )
+        assistant_response = next(m.content[0].text.value for m in messages.data if m.role == "assistant")
 
         speech = await client.audio.speech.create(
             model="tts-1",
@@ -325,16 +346,14 @@ async def voice_handler(message: Message):
         )
         
         await message.answer_voice(
-            types.BufferedInputFile(
-                (await speech.aread()),
-                filename="response.mp3"
-            )
+            types.BufferedInputFile((await speech.aread()), filename="response.mp3")
         )
         await message.answer(f"🤖 Ответ: {assistant_response}")
 
     except Exception as e:
         logger.error(f"Ошибка: {e}", exc_info=True)
         await message.answer("Ошибка обработки запроса")
+
 
 async def main():
     async with engine.begin() as conn:
