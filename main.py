@@ -40,9 +40,9 @@ async def create_assistant():
             name="Voice and Values Assistant",
             instructions="""
             Вы полезный голосовой ассистент. Ваша задача — помогать пользователю определять его ключевые ценности через диалог.
-            Задавайте уточняющие вопросы, чтобы выявить ценности (например, "Что для вас наиболее важно в жизни?", "Какую ценность вы бы поставили на первое место?").
-            Когда ценность определена, вызывайте функцию save_value с аргументом value.
-            Если пользователь не даёт ясного ответа, продолжайте задавать вопросы.
+            Задавайте уточняющие вопросы (например, 'Что для вас наиболее важно в жизни?', 'Какую ценность вы бы поставили на первое место?').
+            Когда пользователь называет чёткую ценность (например, 'семья', 'свобода', 'успех'), немедленно вызывайте функцию save_value с аргументом value, содержащим эту ценность.
+            Если ответ неясен или содержит бред, продолжайте задавать вопросы и не вызывайте save_value до получения валидного ответа.
             Для голосовых сообщений преобразуйте текст в ответы, используя TTS.
             """,
             model="gpt-4o",
@@ -177,7 +177,6 @@ async def values_handler(message: Message, state: FSMContext):
     await state.update_data(thread_id=thread.id)
     await message.answer("Что для тебя наиболее важно в жизни? Назови одну ценность или опиши, что ты ценишь.")
 
-
 @dp.message(ValuesState.waiting_for_value, F.text | F.voice)
 async def process_value(message: Message, state: FSMContext):
     try:
@@ -226,25 +225,40 @@ async def process_value(message: Message, state: FSMContext):
                         if tool_call.function.name == "save_value":
                             logger.info(f"Вызов save_value с аргументами: {tool_call.function.arguments}")
                             import json
-                            arguments = json.loads(tool_call.function.arguments)
-                            value = arguments.get("value")
-                            logger.info(f"Извлечённая ценность: {value}")
-                            success, response = await save_value(message.from_user.id, value)
-                            logger.info(f"Результат save_value: success={success}, response={response}")
-                            await client.beta.threads.runs.submit_tool_outputs(
-                                thread_id=thread_id,
-                                run_id=run.id,
-                                tool_outputs=[
-                                    {
-                                        "tool_call_id": tool_call.id,
-                                        "output": json.dumps({"success": success, "message": response})
-                                    }
-                                ]
-                            )
-                            await message.answer(response)
-                            if success:
+                            try:
+                                arguments = json.loads(tool_call.function.arguments)
+                                value = arguments.get("value")
+                                if not value or not isinstance(value, str) or not value.strip():
+                                    logger.warning(f"Некорректное значение value: {value}")
+                                    await message.answer("Ценность не определена. Пожалуйста, уточните.")
+                                    return
+                                logger.info(f"Извлечённая ценность: {value}")
+                                success, response = await save_value(message.from_user.id, value)
+                                logger.info(f"Результат save_value: success={success}, response={response}")
+                                await client.beta.threads.runs.submit_tool_outputs(
+                                    thread_id=thread_id,
+                                    run_id=run.id,
+                                    tool_outputs=[
+                                        {
+                                            "tool_call_id": tool_call.id,
+                                            "output": json.dumps({"success": success, "message": response})
+                                        }
+                                    ]
+                                )
+                                await message.answer(response)
+                                if success:
+                                    await state.clear()
+                                return
+                            except json.JSONDecodeError as e:
+                                logger.error(f"Ошибка декодирования аргументов: {e}")
+                                await message.answer("Ошибка обработки запроса. Попробуйте снова.")
                                 await state.clear()
-                            return
+                                return
+                            except Exception as e:
+                                logger.error(f"Ошибка при обработке tool_call: {e}", exc_info=True)
+                                await message.answer("Ошибка обработки. Попробуйте снова.")
+                                await state.clear()
+                                return
 
         await message.answer("Пожалуйста, уточните вашу ценность.")
 
@@ -252,8 +266,6 @@ async def process_value(message: Message, state: FSMContext):
         logger.error(f"Ошибка обработки ценности: {e}", exc_info=True)
         await message.answer("Ошибка обработки. Попробуйте снова.")
         await state.clear()
-
-     
 
 @dp.message(F.text)
 async def text_handler(message: Message, state: FSMContext):
