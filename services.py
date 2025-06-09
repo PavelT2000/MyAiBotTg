@@ -4,7 +4,7 @@ from functools import lru_cache
 import openai
 from typing import Tuple, Optional
 from concurrent.futures import ThreadPoolExecutor
-from amplitude import Client, Event  # Исправлен импорт для amplitude-analytics
+from amplitude import client, event  # Исправлен импорт для amplitude-analytics
 
 logger = logging.getLogger(__name__)
 
@@ -14,7 +14,7 @@ executor = ThreadPoolExecutor(max_workers=1)
 class OpenAIService:
     def __init__(self, api_key: str, amplitude_api_key: str):
         self.client = openai.AsyncOpenAI(api_key=api_key)
-        self.amplitude = Client(amplitude_api_key)  # Инициализация Amplitude
+        self.amplitude = client(amplitude_api_key)  # Инициализация Amplitude
 
     async def create_assistant(self) -> str:
         logger.info("create assistant used")
@@ -165,7 +165,7 @@ class OpenAIService:
             logger.info(f"Определено настроение: {mood}")
             executor.submit(
                 self.amplitude.track,
-                Event(
+                event(
                     event_type="mood_analyzed",
                     user_id=str(user_id),
                     event_properties={"mood": mood}
@@ -180,7 +180,7 @@ class OpenAIService:
         logger.info(f"Отправка события Amplitude: {event_type} для user_id: {user_id}")
         executor.submit(
             self.amplitude.track,
-            Event(
+            event(
                 event_type=event_type,
                 user_id=user_id,
                 event_properties=event_properties or {}
