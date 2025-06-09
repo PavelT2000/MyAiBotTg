@@ -6,3 +6,4 @@ sqlalchemy[asyncio]==2.0.35
 asyncpg==0.30.0
 alembic==1.13.3
 amplitude-sdk==1.0.4  # Добавлен для аналитики
+requests==2.32.3
