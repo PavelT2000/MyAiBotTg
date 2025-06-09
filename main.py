@@ -206,8 +206,13 @@ async def voice_handler(message: Message):
         await message.answer("Ошибка обработки запроса")
 
 async def main():
-    await openai_service.verify_or_create_assistant(config.ASSISTANT_ID)
-    await dp.start_polling(bot, drop_pending_updates=True)  # Добавлен параметр для игнорирования старых обновлений
+    global openai_service  # Используем глобальную переменную для переинициализации
+    new_assistant_id = await openai_service.verify_or_create_assistant(config.ASSISTANT_ID)
+    if new_assistant_id != config.ASSISTANT_ID:
+        logger.info(f"Обновлён ASSISTANT_ID с {config.ASSISTANT_ID} на {new_assistant_id}")
+        openai_service = OpenAIService(config.OPENAI_API_KEY)  # Переинициализация сервиса не требуется, достаточно обновить ID
+        # Примечание: Для полного обновления config нужно перезапускать приложение с новым .env
+    await dp.start_polling(bot, drop_pending_updates=True)
 
 if __name__ == "__main__":
     asyncio.run(main())
