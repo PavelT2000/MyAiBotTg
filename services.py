@@ -4,7 +4,7 @@ from functools import lru_cache
 import openai
 from typing import Tuple, Optional
 from concurrent.futures import ThreadPoolExecutor
-from amplitude import Amplitude, BaseEvent  # Amplitude SDK
+from amplitude_sdk import Amplitude, BaseEvent  # Amplitude SDK
 
 logger = logging.getLogger(__name__)
 
