@@ -8,7 +8,7 @@ from aiogram.types import Message
 from aiogram.utils.keyboard import ReplyKeyboardBuilder
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
-from sqlalchemy.sql import text  # Добавлен импорт
+from sqlalchemy.sql import text
 
 from config import config
 from database import init_db, save_value_to_db
@@ -131,7 +131,7 @@ async def text_handler(message: Message, state: FSMContext):
             try:
                 logger.info(f"Попытка загрузки ценностей для user_id: {message.from_user.id}")
                 result = await session.execute(
-                    text("SELECT value FROM user_values WHERE user_id = :user_id"),  # Используем импортированный text
+                    text("SELECT value FROM user_values WHERE user_id = :user_id"),
                     {"user_id": message.from_user.id}
                 )
                 values = result.fetchall()
@@ -207,7 +207,7 @@ async def voice_handler(message: Message):
 
 async def main():
     await openai_service.verify_or_create_assistant(config.ASSISTANT_ID)
-    await dp.start_polling(bot)
+    await dp.start_polling(bot, drop_pending_updates=True)  # Добавлен параметр для игнорирования старых обновлений
 
 if __name__ == "__main__":
     asyncio.run(main())
