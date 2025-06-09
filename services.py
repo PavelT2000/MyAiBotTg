@@ -124,6 +124,3 @@ class OpenAIService:
             run_id=run_id,
             tool_outputs=[{"tool_call_id": tool_call_id, "output": json.dumps({"success": success, "message": response})}]
         )
-
-# Инициализация сервиса
-openai_service = OpenAIService(config.OPENAI_API_KEY)

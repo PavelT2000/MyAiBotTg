@@ -11,7 +11,7 @@ from aiogram.fsm.state import State, StatesGroup
 
 from config import config
 from database import init_db, save_value_to_db
-from services import openai_service
+from services import OpenAIService
 
 # Инициализация бота
 bot = Bot(token=config.TELEGRAM_BOT_TOKEN)
@@ -23,6 +23,9 @@ logger = logging.getLogger(__name__)
 
 # Инициализация базы данных
 engine, async_session = init_db(config.DATABASE_URL)
+
+# Инициализация сервиса OpenAI
+openai_service = OpenAIService(config.OPENAI_API_KEY)
 
 # Клавиатура
 def get_main_keyboard():
@@ -201,7 +204,7 @@ async def voice_handler(message: Message):
         await message.answer("Ошибка обработки запроса")
 
 async def main():
-    await verify_or_create_assistant()
+    await openai_service.verify_or_create_assistant(config.ASSISTANT_ID)
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
