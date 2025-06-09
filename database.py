@@ -21,10 +21,6 @@ def init_db(database_url: str):
 
 async def save_value_to_db(session: AsyncSession, user_id: int, value: str) -> tuple[bool, str]:
     try:
-        is_valid = await validate_value_cached(value)  # Предполагаем, что валидация доступна
-        if not is_valid:
-            return False, "Ценность некорректна. Пожалуйста, уточните, что вы имеете в виду."
-        
         new_value = UserValue(user_id=user_id, value=value)
         session.add(new_value)
         await session.commit()

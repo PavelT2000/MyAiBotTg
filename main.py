@@ -128,6 +128,7 @@ async def text_handler(message: Message, state: FSMContext):
     elif message.text.lower() == "мои ценности":
         async with async_session() as session:
             try:
+                logger.info(f"Попытка загрузки ценностей для user_id: {message.from_user.id}")
                 result = await session.execute(
                     text("SELECT value FROM user_values WHERE user_id = :user_id"),
                     {"user_id": message.from_user.id}
@@ -140,7 +141,7 @@ async def text_handler(message: Message, state: FSMContext):
                 else:
                     await message.answer("У вас пока нет сохранённых ценностей. Используйте /values, чтобы определить их.")
             except Exception as e:
-                logger.error(f"Ошибка при извлечении ценностей: {e}", exc_info=True)
+                logger.error(f"Ошибка при извлечении ценностей для user_id {message.from_user.id}: {e}", exc_info=True)
                 await message.answer("Ошибка при загрузке ваших ценностей. Попробуйте позже.")
     else:
         await message.answer("Используй голосовые сообщения или /values.")
