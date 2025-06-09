@@ -4,7 +4,7 @@ from functools import lru_cache
 import openai
 from typing import Tuple, Optional
 from concurrent.futures import ThreadPoolExecutor
-from amplitude import Amplitude, BaseEvent  # Amplitude SDK
+from amplitude_analytics import Client, Event  # Исправлен импорт для amplitude-analytics
 
 logger = logging.getLogger(__name__)
 
@@ -14,7 +14,7 @@ executor = ThreadPoolExecutor(max_workers=1)
 class OpenAIService:
     def __init__(self, api_key: str, amplitude_api_key: str):
         self.client = openai.AsyncOpenAI(api_key=api_key)
-        self.amplitude = Amplitude(amplitude_api_key)  # Инициализация Amplitude
+        self.amplitude = Client(amplitude_api_key)  # Инициализация Amplitude
 
     async def create_assistant(self) -> str:
         logger.info("create assistant used")
@@ -124,15 +124,25 @@ class OpenAIService:
                     return None, "Ошибка обработки. Попробуйте снова."
         return None, None
 
+    async def process_tool_call(self, thread_id: str, run, session: AsyncSession, user_id: int) -> Tuple[str, bool]:
+        logger.info(f"Обработка tool_call, thread_id: {thread_id}")
+        value, error = await self.handle_tool_outputs(thread_id, run)
+        if error:
+            return error, False
+        if value:
+            success, response = await save_value_to_db(session, user_id, value)
+            await self.submit_tool_output(thread_id, run.id, run.required_action.submit_tool_outputs.tool_calls[0].id, success, response)
+            return response, success
+        return "Ошибка обработки. Попробуйте снова.", False
+
     async def submit_tool_output(self, thread_id: str, run_id: str, tool_call_id: str, success: bool, response: str):
-        await self.client.beta.threads.runs.submit_tool_outputs_and_poll(
+        await self.client.beta.threads.runs.submit_tool_outputs_and_poll(  # Добавлено _and_poll
             thread_id=thread_id,
             run_id=run_id,
             tool_outputs=[{"tool_call_id": tool_call_id, "output": json.dumps({"success": success, "message": response})}]
         )
 
     async def analyze_mood(self, image_url: str, user_id: int) -> str:
-        """Анализ настроения по фото с использованием Vision API."""
         logger.info(f"Анализ настроения для user_id: {user_id}")
         try:
             response = await self.client.chat.completions.create(
@@ -153,10 +163,9 @@ class OpenAIService:
             )
             mood = response.choices[0].message.content.strip()
             logger.info(f"Определено настроение: {mood}")
-            # Отправка события в Amplitude в отдельном потоке
             executor.submit(
                 self.amplitude.track,
-                BaseEvent(
+                Event(
                     event_type="mood_analyzed",
                     user_id=str(user_id),
                     event_properties={"mood": mood}
@@ -168,11 +177,10 @@ class OpenAIService:
             return "Ошибка при анализе настроения."
 
     def send_amplitude_event(self, event_type: str, user_id: str, event_properties: dict = None):
-        """Отправка события в Amplitude в отдельном потоке."""
         logger.info(f"Отправка события Amplitude: {event_type} для user_id: {user_id}")
         executor.submit(
             self.amplitude.track,
-            BaseEvent(
+            Event(
                 event_type=event_type,
                 user_id=user_id,
                 event_properties=event_properties or {}
