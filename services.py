@@ -4,7 +4,7 @@ from functools import lru_cache
 import openai
 from typing import Tuple, Optional
 from concurrent.futures import ThreadPoolExecutor
-from amplitude_analytics import Client, Event  # Исправлен импорт для amplitude-analytics
+from amplitude import Client, Event  # Исправлен импорт для amplitude-analytics
 
 logger = logging.getLogger(__name__)
 
