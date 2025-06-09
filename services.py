@@ -3,7 +3,9 @@ import json
 from functools import lru_cache
 import openai
 from typing import Tuple, Optional
+from sqlalchemy.ext.asyncio import AsyncSession
 from concurrent.futures import ThreadPoolExecutor
+
 from amplitude import client, event  # Исправлен импорт для amplitude-analytics
 
 logger = logging.getLogger(__name__)
