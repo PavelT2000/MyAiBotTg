@@ -3,12 +3,18 @@ import json
 from functools import lru_cache
 import openai
 from typing import Tuple, Optional
+from concurrent.futures import ThreadPoolExecutor
+from amplitude import Amplitude, BaseEvent  # Amplitude SDK
 
 logger = logging.getLogger(__name__)
 
+# Создаём единый ThreadPoolExecutor для Amplitude
+executor = ThreadPoolExecutor(max_workers=1)
+
 class OpenAIService:
-    def __init__(self, api_key: str):
+    def __init__(self, api_key: str, amplitude_api_key: str):
         self.client = openai.AsyncOpenAI(api_key=api_key)
+        self.amplitude = Amplitude(amplitude_api_key)  # Инициализация Amplitude
 
     async def create_assistant(self) -> str:
         logger.info("create assistant used")
@@ -123,4 +129,52 @@ class OpenAIService:
             thread_id=thread_id,
             run_id=run_id,
             tool_outputs=[{"tool_call_id": tool_call_id, "output": json.dumps({"success": success, "message": response})}]
+        )
+
+    async def analyze_mood(self, image_url: str, user_id: int) -> str:
+        """Анализ настроения по фото с использованием Vision API."""
+        logger.info(f"Анализ настроения для user_id: {user_id}")
+        try:
+            response = await self.client.chat.completions.create(
+                model="gpt-4o",
+                messages=[
+                    {
+                        "role": "system",
+                        "content": "Вы эксперт по анализу эмоций. Определите настроение человека на фото (например, 'радость', 'грусть', 'злость', 'спокойствие') и верните только название эмоции."
+                    },
+                    {
+                        "role": "user",
+                        "content": [
+                            {"type": "image_url", "image_url": {"url": image_url}},
+                        ]
+                    }
+                ],
+                max_tokens=10
+            )
+            mood = response.choices[0].message.content.strip()
+            logger.info(f"Определено настроение: {mood}")
+            # Отправка события в Amplitude в отдельном потоке
+            executor.submit(
+                self.amplitude.track,
+                BaseEvent(
+                    event_type="mood_analyzed",
+                    user_id=str(user_id),
+                    event_properties={"mood": mood}
+                )
+            )
+            return mood
+        except Exception as e:
+            logger.error(f"Ошибка при анализе настроения: {e}")
+            return "Ошибка при анализе настроения."
+
+    def send_amplitude_event(self, event_type: str, user_id: str, event_properties: dict = None):
+        """Отправка события в Amplitude в отдельном потоке."""
+        logger.info(f"Отправка события Amplitude: {event_type} для user_id: {user_id}")
+        executor.submit(
+            self.amplitude.track,
+            BaseEvent(
+                event_type=event_type,
+                user_id=user_id,
+                event_properties=event_properties or {}
+            )
         )
