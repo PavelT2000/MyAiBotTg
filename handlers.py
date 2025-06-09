@@ -9,7 +9,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 
 from config import config
-from database import async_session
+from database import get_user_values, AsyncSession  # Импортируем только get_user_values и AsyncSession
 from services import OpenAIService
 
 logger = logging.getLogger(__name__)
@@ -35,11 +35,11 @@ def get_main_keyboard():
     builder.button(text="Моё настроение")
     return builder.as_markup(resize_keyboard=True)
 
-# Состояния для диалога о ценностей
+# Состояния для диалога о ценностях
 class ValuesState(StatesGroup):
     waiting_for_value = State()
 
-def register_handlers(dp: Dispatcher, bot: Bot, openai_service: OpenAIService, assistant_id: str):
+def register_handlers(dp: Dispatcher, bot: Bot, openai_service: OpenAIService, assistant_id: str, async_session):  # Добавлен async_session
     @dp.message(Command("start"))
     async def start_handler(message: Message):
         logger.info("start handler used")

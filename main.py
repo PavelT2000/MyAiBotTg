@@ -34,7 +34,7 @@ async def main():
         logger.info(f"Обновлён ASSISTANT_ID с {config.ASSISTANT_ID} на {assistant_id}")
 
     # Регистрация обработчиков
-    register_handlers(dp, bot, openai_service, assistant_id)
+    register_handlers(dp, bot, openai_service, assistant_id, async_session)  # Добавлен async_session
 
     # Запуск бота
     await dp.start_polling(bot, drop_pending_updates=True)
