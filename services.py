@@ -4,7 +4,7 @@ from functools import lru_cache
 import openai
 from typing import Tuple, Optional
 from concurrent.futures import ThreadPoolExecutor
-from amplitude import Amplitude, Event  # Исправлен импорт для amplitude-analytics
+from amplitude import Amplitude, event  # Исправлен импорт для amplitude-analytics
 
 from database import save_value_to_db, AsyncSession
 
@@ -167,7 +167,7 @@ class OpenAIService:
             logger.info(f"Определено настроение: {mood}")
             executor.submit(
                 self.amplitude.track,
-                Event(
+                event(
                     event_type="mood_analyzed",
                     user_id=str(user_id),
                     event_properties={"mood": mood}
@@ -182,7 +182,7 @@ class OpenAIService:
         logger.info(f"Отправка события Amplitude: {event_type} для user_id: {user_id}")
         executor.submit(
             self.amplitude.track,
-            Event(
+            event(
                 event_type=event_type,
                 user_id=user_id,
                 event_properties=event_properties or {}
