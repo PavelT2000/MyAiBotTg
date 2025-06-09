@@ -1,6 +1,5 @@
-from sqlalchemy import Column, Integer, BigInteger, String, DateTime
+from sqlalchemy import Column, BigInteger, String, DateTime
 from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import mapped_column
 from datetime import datetime
 
 Base = declarative_base()
@@ -8,7 +7,7 @@ Base = declarative_base()
 class UserValue(Base):
     __tablename__ = "user_values"
     
-    id = mapped_column(BigInteger, primary_key=True)  
-    user_id = mapped_column(BigInteger, nullable=False)
-    value = mapped_column(String(255), nullable=False)
-    created_at = mapped_column(DateTime, default=datetime.utcnow)
+    id = Column(BigInteger, primary_key=True)
+    user_id = Column(BigInteger, nullable=False)
+    value = Column(String(255), nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
