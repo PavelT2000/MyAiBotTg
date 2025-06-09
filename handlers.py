@@ -9,7 +9,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 
 from config import config
-from database import AsyncSession
+from database import async_session
 from services import OpenAIService
 
 logger = logging.getLogger(__name__)
@@ -127,7 +127,7 @@ def register_handlers(dp: Dispatcher, bot: Bot, openai_service: OpenAIService, a
             )
 
             if run.status == "requires_action" and run.required_action and run.required_action.submit_tool_outputs:
-                async with AsyncSession() as session:
+                async with async_session() as session:
                     response, success = await openai_service.process_tool_call(thread_id, run, session, message.from_user.id)
                     await message.answer(response)
                     openai_service.send_amplitude_event(
@@ -167,7 +167,7 @@ def register_handlers(dp: Dispatcher, bot: Bot, openai_service: OpenAIService, a
         elif message.text.lower() == "о боте":
             await message.answer(BOT_FUNCTIONS, parse_mode="Markdown")
         elif message.text.lower() == "мои ценности":
-            async with AsyncSession() as session:
+            async with async_session() as session:
                 try:
                     logger.info(f"Попытка загрузки ценностей для user_id: {message.from_user.id}")
                     values = await get_user_values(session, message.from_user.id)
@@ -215,7 +215,7 @@ def register_handlers(dp: Dispatcher, bot: Bot, openai_service: OpenAIService, a
             )
             
             if run.status == "requires_action" and run.required_action and run.required_action.submit_tool_outputs:
-                async with AsyncSession() as session:
+                async with async_session() as session:
                     response, success = await openai_service.process_tool_call(thread.id, run, session, message.from_user.id)
                     await message.answer(response)
                     openai_service.send_amplitude_event(

@@ -3,10 +3,10 @@ import json
 from functools import lru_cache
 import openai
 from typing import Tuple, Optional
-from sqlalchemy.ext.asyncio import AsyncSession
 from concurrent.futures import ThreadPoolExecutor
+from amplitude import Amplitude, Event  # Исправлен импорт для amplitude-analytics
 
-from amplitude import client, event  # Исправлен импорт для amplitude-analytics
+from database import save_value_to_db, AsyncSession
 
 logger = logging.getLogger(__name__)
 
@@ -16,7 +16,7 @@ executor = ThreadPoolExecutor(max_workers=1)
 class OpenAIService:
     def __init__(self, api_key: str, amplitude_api_key: str):
         self.client = openai.AsyncOpenAI(api_key=api_key)
-        self.amplitude = client(amplitude_api_key)  # Инициализация Amplitude
+        self.amplitude = Amplitude(amplitude_api_key)  # Исправлено: Amplitude вместо Client
 
     async def create_assistant(self) -> str:
         logger.info("create assistant used")
@@ -138,7 +138,7 @@ class OpenAIService:
         return "Ошибка обработки. Попробуйте снова.", False
 
     async def submit_tool_output(self, thread_id: str, run_id: str, tool_call_id: str, success: bool, response: str):
-        await self.client.beta.threads.runs.submit_tool_outputs_and_poll(  # Добавлено _and_poll
+        await self.client.beta.threads.runs.submit_tool_outputs_and_poll(
             thread_id=thread_id,
             run_id=run_id,
             tool_outputs=[{"tool_call_id": tool_call_id, "output": json.dumps({"success": success, "message": response})}]
@@ -167,7 +167,7 @@ class OpenAIService:
             logger.info(f"Определено настроение: {mood}")
             executor.submit(
                 self.amplitude.track,
-                event(
+                Event(
                     event_type="mood_analyzed",
                     user_id=str(user_id),
                     event_properties={"mood": mood}
@@ -182,7 +182,7 @@ class OpenAIService:
         logger.info(f"Отправка события Amplitude: {event_type} для user_id: {user_id}")
         executor.submit(
             self.amplitude.track,
-            event(
+            Event(
                 event_type=event_type,
                 user_id=user_id,
                 event_properties=event_properties or {}
