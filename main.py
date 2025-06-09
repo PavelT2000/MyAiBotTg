@@ -8,6 +8,7 @@ from aiogram.types import Message
 from aiogram.utils.keyboard import ReplyKeyboardBuilder
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
+from sqlalchemy.sql import text  # Добавлен импорт
 
 from config import config
 from database import init_db, save_value_to_db
@@ -130,7 +131,7 @@ async def text_handler(message: Message, state: FSMContext):
             try:
                 logger.info(f"Попытка загрузки ценностей для user_id: {message.from_user.id}")
                 result = await session.execute(
-                    text("SELECT value FROM user_values WHERE user_id = :user_id"),
+                    text("SELECT value FROM user_values WHERE user_id = :user_id"),  # Используем импортированный text
                     {"user_id": message.from_user.id}
                 )
                 values = result.fetchall()
