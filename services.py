@@ -4,7 +4,7 @@ from functools import lru_cache
 import openai
 from typing import Tuple, Optional
 from concurrent.futures import ThreadPoolExecutor
-from amplitude import Amplitude, event  # Исправлен импорт для amplitude-analytics
+from amplitude import Amplitude, BaseEvent  # Исправлен импорт: Event → BaseEvent
 
 from database import save_value_to_db, AsyncSession
 
@@ -16,7 +16,7 @@ executor = ThreadPoolExecutor(max_workers=1)
 class OpenAIService:
     def __init__(self, api_key: str, amplitude_api_key: str):
         self.client = openai.AsyncOpenAI(api_key=api_key)
-        self.amplitude = Amplitude(amplitude_api_key)  # Исправлено: Amplitude вместо Client
+        self.amplitude = Amplitude(amplitude_api_key)
 
     async def create_assistant(self) -> str:
         logger.info("create assistant used")
@@ -25,7 +25,7 @@ class OpenAIService:
                 name="Voice and Values Assistant",
                 instructions="""
                 Вы полезный голосовой ассистент. Ваша задача — помогать пользователю определять его ключевые ценности через диалог.
-                Начните с вопроса: 'Что для вас наиболее важно в жизни? Назови одну ценность (например, семья, свобода, успех).'
+                Начните с вопроса: 'Что для вас наиболее важное в жизни? Назови одну ценность (например, семья, свобода, успех).'
                 Если пользователь говорит 'добавить к ценностям [ценность]' или называет новую ценность, вызывайте save_value с этой ценностью.
                 Если ответ неясен, продолжайте задавать вопросы, такие как: 'Пожалуйста, назовите конкретную ценность.'
                 Не вызывайте save_value, если ответ не является валидной ценностью.
@@ -145,7 +145,7 @@ class OpenAIService:
         )
 
     async def analyze_mood(self, image_url: str, user_id: int) -> str:
-        logger.info(f"Анализ настроения для user_id: {user_id}")
+        logger.info(f"Analytics mood for user_id: {user_id}")
         try:
             response = await self.client.chat.completions.create(
                 model="gpt-4o",
@@ -167,7 +167,7 @@ class OpenAIService:
             logger.info(f"Определено настроение: {mood}")
             executor.submit(
                 self.amplitude.track,
-                event(
+                BaseEvent(  # Исправлено: Event -> BaseEvent
                     event_type="mood_analyzed",
                     user_id=str(user_id),
                     event_properties={"mood": mood}
@@ -182,7 +182,7 @@ class OpenAIService:
         logger.info(f"Отправка события Amplitude: {event_type} для user_id: {user_id}")
         executor.submit(
             self.amplitude.track,
-            event(
+            BaseEvent(  # Исправлено: Event -> BaseEvent
                 event_type=event_type,
                 user_id=user_id,
                 event_properties=event_properties or {}
