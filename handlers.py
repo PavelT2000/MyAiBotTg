@@ -90,7 +90,7 @@ def register_handlers(dp: Dispatcher, bot: Bot, openai_service: OpenAIService, a
         await state.update_data(thread_id=thread.id)
         await message.answer("Что для тебя наиболее важное в жизни? Назови одну ценность или опиши, что ты ценишь.")
 
-    @dp.message(F.voice | (F.text & state=ValuesState.waiting_for_value))
+    @dp.message(F.voice | (F.text & state==ValuesState.waiting_for_value))
     async def message_handler(message: Message, state: FSMContext):
         logger.info("message handler used")
         try:
