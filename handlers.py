@@ -2,7 +2,7 @@ import logging
 from io import BytesIO
 
 from aiogram import Bot, Dispatcher, types, F
-from aiogram.filters import Command, StateFilter
+from aiogram.filters import Command
 from aiogram.types import Message
 from aiogram.utils.keyboard import ReplyKeyboardBuilder
 from aiogram.fsm.context import FSMContext
@@ -90,13 +90,18 @@ def register_handlers(dp: Dispatcher, bot: Bot, openai_service: OpenAIService, a
         await state.update_data(thread_id=thread.id)
         await message.answer("Что для тебя наиболее важное в жизни? Назови одну ценность или опиши, что ты ценишь.")
 
-    @dp.message(F.voice | (F.text & StateFilter(ValuesState.waiting_for_value)))
+    @dp.message(F.voice | F.text)
     async def message_handler(message: Message, state: FSMContext):
         logger.info("message handler used")
+        is_values_context = await state.get_state() == ValuesState.waiting_for_value
+
+        # Пропускаем текстовые сообщения вне состояния ValuesState.waiting_for_value
+        if message.text and not is_values_context:
+            return
+
         try:
             user_question = ""
             event_properties = {}
-            is_values_context = await state.get_state() == ValuesState.waiting_for_value
 
             # Обработка голосового или текстового сообщения
             if message.voice:
