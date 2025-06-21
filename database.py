@@ -9,10 +9,7 @@ logger = logging.getLogger(__name__)
 def create_async_engine(database_url: str):
     """Создаёт асинхронный движок SQLAlchemy."""
     try:
-        engine = create_async_engine(
-            database_url,
-            pool_pre_ping=True
-        )
+        engine = create_async_engine(database_url)
         logger.info(f"Async engine created for database: {database_url}")
         return engine
     except Exception as e:
