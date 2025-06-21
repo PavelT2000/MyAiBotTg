@@ -1,286 +1,114 @@
-import logging
-from io import BytesIO
 
-from aiogram import Bot, Dispatcher, types, F
-from aiogram.filters import Command, StateFilter
-from aiogram.types import Message
-from aiogram.utils.keyboard import ReplyKeyboardBuilder
+import logging
+from aiogram import Router, F
+from aiogram.types import Message, FSInputFile
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
-
-from config import config
-from database import get_user_values, AsyncSession
-from services import OpenAIService
+from services import OpenAIService, save_value_to_db
+from config import Config
 
 logger = logging.getLogger(__name__)
+router = Router()
 
-# Описание функций бота
-BOT_FUNCTIONS = """
-🤖 **О моих возможностях**:
-
-1. **Голосовой помощник**: Отправь голосовое сообщение, и я преобразую его в текст, отвечу на твой вопрос и озвучу ответ! Использую передовые технологии OpenAI для распознавания речи и генерации голоса.
-2. **Определение ценностей**: Используй команду `/values`, чтобы обсудить, что для тебя важно в жизни (например, семья, свобода, успех). Я сохраню твои ценности в базе данных после проверки их корректности.
-3. **Анализ настроения**: Отправь фото своего лица с командой `/mood`, и я определю твоё настроение (радость, грусть, спокойствие и т.д.) с помощью анализа изображения.
-4. **Мои ценности**: Нажми кнопку "Мои ценности", чтобы посмотреть список сохранённых ценностей.
-5. **Вопросы о тревожности**: Задай вопрос о тревожности, и я отвечу на основе документа с информацией!
-
-Попробуй все функции! Если нужна помощь, напиши "Помощь" или используй команду `/start`.
-"""
-
-# Клавиатура
-def get_main_keyboard():
-    builder = ReplyKeyboardBuilder()
-    builder.button(text="Помощь")
-    builder.button(text="О боте")
-    builder.button(text="Мои ценности")
-    builder.button(text="Моё настроение")
-    return builder.as_markup(resize_keyboard=True)
-
-# Состояния для диалога
 class ValuesState(StatesGroup):
     waiting_for_value = State()
 
-async def _process_message(
-    message: Message,
-    state: FSMContext,
-    openai_service: OpenAIService,
-    assistant_id: str,
-    async_session: AsyncSession,
-    user_question: str,
-    event_properties: dict,
-    is_values_context: bool
-):
-    """Общая логика обработки сообщения (голосового или текстового)."""
-    try:
-        # Отправка события Amplitude
-        event_type = "value_input" if is_values_context else "voice_message"
-        openai_service.send_amplitude_event(event_type, str(message.from_user.id), event_properties)
+@router.message(commands=["start"])
+async def start_handler(message: Message):
+    await message.answer(
+        "Привет! Я бот, который помогает справляться с тревожностью.\n"
+        "Команды:\n/values - назвать ценность\n/mood - загрузить фото\n"
+        "Задай вопрос о тревожности или отправь голосовое сообщение!"
+    )
 
-        # Получение или создание треда
-        data = await state.get_data()
-        thread_id = data.get("thread_id")
+@router.message(commands=["values"])
+async def values_handler(message: Message, state: FSMContext, async_session):
+    await state.set_state(ValuesState.waiting_for_value)
+    await message.answer("Назови свою ценность (текстом или голосом).")
+
+@router.message(ValuesState.waiting_for_value, F.text)
+async def value_text_handler(message: Message, state: FSMContext, async_session):
+    value = message.text
+    try:
+        await save_value_to_db(async_session, message.from_user.id, value)
+        await message.answer(f"Ценность '{value}' сохранена!")
+        await state.clear()
+    except Exception as e:
+        logger.error(f"Error saving value: {e}")
+        await message.answer("Ошибка при сохранении ценности.")
+
+@router.message(ValuesState.waiting_for_value, F.voice)
+async def value_voice_handler(message: Message, state: FSMContext, async_session, openai_service: OpenAIService):
+    file_path = f"audio_{message.message_id}.ogg"
+    try:
+        await message.bot.download(message.voice.file_id, file_path)
+        transcription = await openai_service.transcribe_audio(file_path)
+        await save_value_to_db(async_session, message.from_user.id, transcription)
+        await message.answer(f"Ценность '{transcription}' сохранена!")
+        await state.clear()
+    except Exception as e:
+        logger.error(f"Error processing voice: {e}")
+        await message.answer("Ошибка при обработке голосового сообщения.")
+    finally:
+        if os.path.exists(file_path):
+            os.remove(file_path)
+
+@router.message(commands=["mood"])
+async def mood_handler(message: Message):
+    await message.answer("Отправь фото, чтобы я проанализировал настроение.")
+
+@router.message(F.photo)
+async def photo_handler(message: Message, openai_service: OpenAIService):
+    file_path = f"photo_{message.message_id}.jpg"
+    try:
+        await message.bot.download(message.photo[-1].file_id, file_path)
+        mood = await openai_service.process_image(file_path)
+        await message.answer(f"Настроение на фото: {mood}")
+    except Exception as e:
+        logger.error(f"Error processing photo: {e}")
+        await message.answer("Ошибка при анализе фото.")
+    finally:
+        if os.path.exists(file_path):
+            os.remove(file_path)
+
+@router.message(F.voice)
+async def voice_handler(message: Message, state: FSMContext, openai_service: OpenAIService):
+    file_path = f"audio_{message.message_id}.ogg"
+    try:
+        current_state = await state.get_state()
+        if current_state == ValuesState.waiting_for_value:
+            await value_voice_handler(message, state, openai_service)
+            return
+        await message.bot.download(message.voice.file_id, file_path)
+        transcription = await openai_service.transcribe_audio(file_path)
+        thread_id = (await state.get_data()).get("thread_id")
         if not thread_id:
             thread = await openai_service.client.beta.threads.create()
-            await state.update_data(thread_id=thread.id)
             thread_id = thread.id
-
-        await openai_service.client.beta.threads.messages.create(
-            thread_id=thread_id,
-            role="user",
-            content=user_question
-        )
-
-        run = await openai_service.client.beta.threads.runs.create_and_poll(
-            thread_id=thread_id,
-            assistant_id=assistant_id
-        )
-
-        if run.status == "requires_action" and run.required_action and run.required_action.submit_tool_outputs:
-            async with async_session() as session:
-                response, success = await openai_service.process_tool_call(thread_id, run, session, message.from_user.id)
-                await message.answer(response)
-                openai_service.send_amplitude_event(
-                    "value_saved" if success else "value_error",
-                    str(message.from_user.id),
-                    {"value": response, "success": success} if success else {"error": response}
-                )
-                if success and is_values_context:
-                    await state.clear()
-                return
-        elif run.status != "completed":
-            raise Exception(f"Run завершился с ошибкой, статус: {run.status}")
-
-        messages = await openai_service.client.beta.threads.messages.list(thread_id=thread_id)
-        assistant_response = ""
-        file_citation = None
-        for msg in messages.data:
-            if msg.role == "assistant":
-                for content in msg.content:
-                    if content.type == "text":
-                        assistant_response = content.text.value
-                        if content.text.annotations:
-                            for annotation in content.text.annotations:
-                                if annotation.type == "file_citation":
-                                    file_citation = annotation.file_citation.file_id
-                                    break
-                        break
-                break
-
-        # Получение имени файла, если есть file_citation
-        file_name = ""
-        if file_citation:
-            file_info = await openai_service.client.files.retrieve(file_citation)
-            file_name = file_info.filename
-
-        # TTS и ответ для голосового контекста
-        if not is_values_context:
-            speech = await openai_service.client.audio.speech.create(
-                model="tts-1",
-                voice="alloy",
-                input=assistant_response
-            )
-            await message.answer_voice(
-                types.BufferedInputFile((await speech.aread()), filename="response.mp3")
-            )
-
-        # Формирование ответа с указанием файла, если использован
-        response_text = f"🤖 Ответ: {assistant_response}"
-        if file_name:
-            response_text += f"\n\nИсточник: {file_name}"
-        await message.answer(response_text)
-        openai_service.send_amplitude_event("assistant_response", str(message.from_user.id), {"response": assistant_response, "file_name": file_name})
-
-        # Запрос уточнения для контекста ценностей
-        if is_values_context:
-            await message.answer("Пожалуйста, уточните вашу ценность.")
-
+            await state.update_data(thread_id=thread_id)
+        response = await openai_service.process_message(thread_id, transcription)
+        await message.answer(response, parse_mode="Markdown")
     except Exception as e:
-        logger.error(f"Ошибка обработки сообщения: {e}", exc_info=True)
-        event_error_type = "value_processing_error" if is_values_context else "voice_error"
-        openai_service.send_amplitude_event(event_error_type, str(message.from_user.id), {"error": str(e)})
-        await message.answer("Ошибка обработки. Попробуйте снова.")
-        if is_values_context:
-            await state.clear()
+        logger.error(f"Error processing voice: {e}")
+        await message.answer("Ошибка при обработке голосового сообщения.")
+    finally:
+        if os.path.exists(file_path):
+            os.remove(file_path)
 
-def register_handlers(dp: Dispatcher, bot: Bot, openai_service: OpenAIService, assistant_id: str, async_session):
-    @dp.message(Command("start"))
-    async def start_handler(message: Message):
-        logger.info("start handler used")
-        openai_service.send_amplitude_event("start_command", str(message.from_user.id))
-        await message.answer(
-            f"Привет! Я твой умный голосовой ассистент. 😊\n\n{BOT_FUNCTIONS}",
-            reply_markup=get_main_keyboard(),
-            parse_mode="Markdown"
-        )
-
-    @dp.message(Command("mood"))
-    async def mood_handler(message: Message):
-        logger.info("mood handler used")
-        openai_service.send_amplitude_event("mood_command", str(message.from_user.id))
-        await message.answer("Отправь фото своего лица, и я определю твоё настроение!")
-
-    @dp.message(F.photo)
-    async def photo_handler(message: Message):
-        logger.info("photo handler used")
-        try:
-            photo = message.photo[-1]
-            file = await bot.get_file(photo.file_id)
-            file_url = f"https://api.telegram.org/file/bot{config.TELEGRAM_BOT_TOKEN}/{file.file_path}"
-            
-            mood = await openai_service.analyze_mood(file_url, message.from_user.id)
-            openai_service.send_amplitude_event("photo_processed", str(message.from_user.id), {"mood": mood})
-
-            speech = await openai_service.client.audio.speech.create(
-                model="tts-1",
-                voice="alloy",
-                input=f"Ваше настроение: {mood}"
-            )
-            await message.answer_voice(
-                types.BufferedInputFile((await speech.aread()), filename="mood_response.mp3")
-            )
-            await message.answer(f"🤖 Ваше настроение: {mood}")
-        except Exception as e:
-            logger.error(f"Ошибка обработки фото: {e}", exc_info=True)
-            openai_service.send_amplitude_event("photo_error", str(message.from_user.id), {"error": str(e)})
-            await message.answer("Ошибка обработки фото. Попробуйте снова.")
-
-    @dp.message(Command("values"))
-    async def values_handler(message: Message, state: FSMContext):
-        logger.info("values handler used")
-        openai_service.send_amplitude_event("values_command", str(message.from_user.id))
-        await state.set_state(ValuesState.waiting_for_value)
-        thread = await openai_service.client.beta.threads.create()
-        await state.update_data(thread_id=thread.id)
-        await message.answer("Что для тебя наиболее важное в жизни? Назови одну ценность или опиши, что ты ценишь.")
-
-    @dp.message(F.voice)
-    async def voice_handler(message: Message, state: FSMContext):
-        logger.info("voice handler used")
-        is_values_context = await state.get_state() == ValuesState.waiting_for_value
-
-        try:
-            voice_file = await bot.get_file(message.voice.file_id)
-            voice_data = await bot.download_file(voice_file.file_path)
-            transcript = await openai_service.client.audio.transcriptions.create(
-                file=("voice.ogg", BytesIO(voice_data.read()), "audio/ogg"),
-                model="whisper-1"
-            )
-            user_question = transcript.text
-            logger.info(f"Транскрипция голосового сообщения: {user_question}")
-            await message.answer(f"🎤 Ваш вопрос: {user_question}")
-
-            await _process_message(
-                message=message,
-                state=state,
-                openai_service=openai_service,
-                assistant_id=assistant_id,
-                async_session=async_session,
-                user_question=user_question,
-                event_properties={"transcript": user_question},
-                is_values_context=is_values_context
-            )
-
-        except Exception as e:
-            logger.error(f"Ошибка обработки голосового сообщения: {e}", exc_info=True)
-            openai_service.send_amplitude_event("voice_error", str(message.from_user.id), {"error": str(e)})
-            await message.answer("Ошибка обработки голосового сообщения. Попробуйте снова.")
-            if is_values_context:
-                await state.clear()
-
-    @dp.message(F.text, StateFilter(ValuesState.waiting_for_value))
-    async def value_text_handler(message: Message, state: FSMContext):
-        logger.info("value text handler used")
-        user_question = message.text
-        is_values_context = True
-
-        await _process_message(
-            message=message,
-            state=state,
-            openai_service=openai_service,
-            assistant_id=assistant_id,
-            async_session=async_session,
-            user_question=user_question,
-            event_properties={"text": user_question},
-            is_values_context=is_values_context
-        )
-
-    @dp.message(F.text)
-    async def text_handler(message: Message, state: FSMContext):
-        logger.info("text handler used")
-        event_properties = {"text": message.text.lower()}
-        openai_service.send_amplitude_event("text_message", str(message.from_user.id), event_properties)
-        if message.text.lower() == "помощь":
-            await message.answer("Отправь голосовое сообщение, используй /values для ценностей или /mood для настроения.")
-        elif message.text.lower() == "о боте":
-            await message.answer(BOT_FUNCTIONS, parse_mode="Markdown")
-        elif message.text.lower() == "мои ценности":
-            async with async_session() as session:
-                try:
-                    logger.info(f"Попытка загрузки ценностей для user_id: {message.from_user.id}")
-                    values = await get_user_values(session, message.from_user.id)
-                    logger.info(f"Полученные ценности для user_id {message.from_user.id}: {values}")
-                    if values:
-                        await message.answer(f"Ваши сохранённые ценности: {', '.join(values)}")
-                        openai_service.send_amplitude_event("values_viewed", str(message.from_user.id), {"values": values})
-                    else:
-                        await message.answer("У вас пока нет сохранённых ценностей. Используйте /values, чтобы определить их.")
-                        openai_service.send_amplitude_event("values_viewed", str(message.from_user.id), {"values": []})
-                except Exception as e:
-                    logger.error(f"Ошибка при извлечении ценностей для user_id {message.from_user.id}: {e}", exc_info=True)
-                    openai_service.send_amplitude_event("values_error", str(message.from_user.id), {"error": str(e)})
-                    await message.answer("Ошибка при загрузке ваших ценностей. Попробуйте позже.")
-        elif message.text.lower() == "моё настроение":
-            await mood_handler(message)
-        else:
-            # Обработка вопросов, не связанных с командами
-            user_question = message.text
-            await _process_message(
-                message=message,
-                state=state,
-                openai_service=openai_service,
-                assistant_id=assistant_id,
-                async_session=async_session,
-                user_question=user_question,
-                event_properties={"text": user_question},
-                is_values_context=False
-            )
+@router.message(F.text)
+async def text_handler(message: Message, state: FSMContext, openai_service: OpenAIService):
+    try:
+        current_state = await state.get_state()
+        if current_state == ValuesState.waiting_for_value:
+            await value_text_handler(message, state, openai_service)
+            return
+        thread_id = (await state.get_data()).get("thread_id")
+        if not thread_id:
+            thread = await openai_service.client.beta.threads.create()
+            thread_id = thread.id
+            await state.update_data(thread_id=thread_id)
+        response = await openai_service.process_message(thread_id, message.text)
+        await message.answer(response, parse_mode="Markdown")
+    except Exception as e:
+        logger.error(f"Error processing text: {e}")
+        await message.answer("Ошибка при обработке сообщения.")
