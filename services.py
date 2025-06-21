@@ -1,5 +1,4 @@
 import logging
-import os
 import asyncio
 import base64
 from typing import Optional
@@ -15,31 +14,10 @@ class OpenAIService:
         self.assistant_id = assistant_id
         self.vector_store_id: Optional[str] = None
 
-    async def create_vector_store(self, file_path: str) -> str:
-        """Создаёт векторное хранилище для файла и возвращает его ID."""
-        try:
-            logger.debug(f"Creating vector store for file: {file_path}")
-            if not os.path.exists(file_path):
-                raise FileNotFoundError(f"File {file_path} not found")
-            with open(file_path, "rb") as file:
-                vector_store = await self.client.beta.vector_stores.create(
-                    name="Anxiety Document Store",
-                    file_streams=[file]
-                )
-            self.vector_store_id = vector_store.id
-            logger.info(f"Vector store created with ID: {vector_store.id}")
-            return vector_store.id
-        except AttributeError as e:
-            logger.error(f"AttributeError in create_vector_store: {e}")
-            raise
-        except Exception as e:
-            logger.error(f"Error creating vector store: {e}")
-            raise
-
     async def update_assistant(self) -> None:
         """Обновляет ассистента с file_search и vector_store_id."""
         if not self.vector_store_id:
-            raise ValueError("Vector store ID is not set. Call create_vector_store first.")
+            raise ValueError("Vector store ID is not set.")
         try:
             logger.debug(f"Updating assistant {self.assistant_id} with vector store {self.vector_store_id}")
             assistant = await self.client.beta.assistants.update(
