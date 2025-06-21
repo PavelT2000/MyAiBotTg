@@ -6,7 +6,7 @@ from models import Base, UserValue
 
 logger = logging.getLogger(__name__)
 
-def create_async_engine(database_url: str):
+def create_engine_async(database_url: str):
     """Создаёт асинхронный движок SQLAlchemy."""
     try:
         logger.debug(f"Attempting to create async engine for {database_url}")
@@ -20,7 +20,7 @@ def create_async_engine(database_url: str):
 def create_async_session(database_url: str) -> sessionmaker:
     """Создаёт фабрику асинхронных сессий SQLAlchemy."""
     logger.debug("Creating async session factory")
-    engine = create_async_engine(database_url)
+    engine = create_engine_async(database_url)
     async_session = sessionmaker(
         engine,
         class_=AsyncSession,
