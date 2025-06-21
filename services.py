@@ -1,15 +1,16 @@
 import logging
-from openai import AsyncOpenAI
-from typing import Optional
-import base64
 import os
 import asyncio
+import base64
+from typing import Optional
+from openai import AsyncOpenAI
 
 logger = logging.getLogger(__name__)
 
 class OpenAIService:
     def __init__(self, api_key: str, assistant_id: str):
         """Инициализирует сервис OpenAI с асинхронным клиентом."""
+        logger.debug("Initializing OpenAIService with AsyncOpenAI client")
         self.client = AsyncOpenAI(api_key=api_key)
         self.assistant_id = assistant_id
         self.vector_store_id: Optional[str] = None
@@ -28,6 +29,9 @@ class OpenAIService:
             self.vector_store_id = vector_store.id
             logger.info(f"Vector store created with ID: {vector_store.id}")
             return vector_store.id
+        except AttributeError as e:
+            logger.error(f"AttributeError in create_vector_store: {e}")
+            raise
         except Exception as e:
             logger.error(f"Error creating vector store: {e}")
             raise
