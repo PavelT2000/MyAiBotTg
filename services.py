@@ -3,6 +3,7 @@ import asyncio
 import base64
 from typing import Optional
 from openai import AsyncOpenAI
+import httpx
 
 logger = logging.getLogger(__name__)
 
@@ -10,7 +11,10 @@ class OpenAIService:
     def __init__(self, api_key: str, assistant_id: str):
         """Инициализирует сервис OpenAI с асинхронным клиентом."""
         logger.debug("Initializing OpenAIService with AsyncOpenAI client")
-        self.client = AsyncOpenAI(api_key=api_key)
+        self.client = AsyncOpenAI(
+            api_key=api_key,
+            http_client=httpx.AsyncClient()  # Явно создаём HTTP-клиент без proxies
+        )
         self.assistant_id = assistant_id
         self.vector_store_id: Optional[str] = None
 
