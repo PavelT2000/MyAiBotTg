@@ -1,4 +1,3 @@
-
 import logging
 from aiogram import Router, F
 from aiogram.types import Message, FSInputFile
@@ -6,6 +5,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from services import OpenAIService, save_value_to_db
 from config import Config
+import os
 
 logger = logging.getLogger(__name__)
 router = Router()
@@ -77,7 +77,7 @@ async def voice_handler(message: Message, state: FSMContext, openai_service: Ope
     try:
         current_state = await state.get_state()
         if current_state == ValuesState.waiting_for_value:
-            await value_voice_handler(message, state, openai_service)
+            await value_voice_handler(message, state, async_session, openai_service)
             return
         await message.bot.download(message.voice.file_id, file_path)
         transcription = await openai_service.transcribe_audio(file_path)
@@ -100,7 +100,7 @@ async def text_handler(message: Message, state: FSMContext, openai_service: Open
     try:
         current_state = await state.get_state()
         if current_state == ValuesState.waiting_for_value:
-            await value_text_handler(message, state, openai_service)
+            await value_text_handler(message, state, async_session)
             return
         thread_id = (await state.get_data()).get("thread_id")
         if not thread_id:

@@ -3,9 +3,8 @@ import asyncio
 from aiogram import Bot, Dispatcher
 from aiogram.fsm.storage.redis import RedisStorage
 from redis.asyncio import Redis
-from openai import AsyncOpenAI
 from database import create_async_session
-from services import create_vector_store, update_assistant
+from services import OpenAIService
 from handlers import router
 from config import Config
 
@@ -21,16 +20,16 @@ async def main():
         dp.include_router(router)
 
         async_session = create_async_session(config.DATABASE_URL)
-        client = AsyncOpenAI(api_key=config.OPENAI_API_KEY)
+        openai_service = OpenAIService(api_key=config.OPENAI_API_KEY, assistant_id=config.ASSISTANT_ID)
 
         # Инициализация vector_store и ассистента
         logger.debug("Initializing vector store and assistant")
-        vector_store_id = await create_vector_store(client, "Anxiety.docx")
-        await update_assistant(client, config.ASSISTANT_ID, vector_store_id)
+        vector_store_id = await openai_service.create_vector_store("Anxiety.docx")
+        await openai_service.update_assistant()
 
         # Передача зависимостей в handlers
         dp["async_session"] = async_session
-        dp["openai_client"] = client
+        dp["openai_service"] = openai_service
 
         logger.info("Starting bot polling")
         await dp.start_polling()

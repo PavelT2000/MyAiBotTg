@@ -3,6 +3,7 @@ from openai import AsyncOpenAI
 from typing import Optional
 import base64
 import os
+import asyncio
 
 logger = logging.getLogger(__name__)
 
