@@ -1,5 +1,6 @@
 import logging
 import asyncio
+import os
 from aiogram import Bot, Dispatcher
 from aiogram.fsm.storage.redis import RedisStorage
 from redis.asyncio import Redis
@@ -8,6 +9,8 @@ from services import OpenAIService
 from handlers import router
 from config import Config
 from openai import OpenAI
+import openai
+import inspect
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -15,8 +18,11 @@ logger = logging.getLogger(__name__)
 def sync_create_vector_store(file_path: str, api_key: str) -> str:
     """Создаёт векторное хранилище с использованием синхронного клиента OpenAI."""
     try:
-        logger.debug(f"Creating vector store for file: {file_path} with sync client")
+        logger.info(f"OpenAI library version: {openai.__version__}")
         client = OpenAI(api_key=api_key)
+        logger.debug(f"Client beta attributes: {dir(client.beta)}")
+        if not os.path.exists(file_path):
+            raise FileNotFoundError(f"File {file_path} not found")
         with open(file_path, "rb") as file:
             vector_store = client.beta.vector_stores.create(
                 name="Anxiety Document Store",
@@ -24,6 +30,9 @@ def sync_create_vector_store(file_path: str, api_key: str) -> str:
             )
         logger.info(f"Vector store created with ID: {vector_store.id}")
         return vector_store.id
+    except AttributeError as e:
+        logger.error(f"AttributeError in sync_create_vector_store: {e}")
+        raise
     except Exception as e:
         logger.error(f"Error creating vector store with sync client: {e}")
         raise
