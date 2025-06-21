@@ -1,4 +1,3 @@
-
 import logging
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
 from sqlalchemy.orm import sessionmaker
@@ -10,6 +9,7 @@ logger = logging.getLogger(__name__)
 def create_async_engine(database_url: str):
     """Создаёт асинхронный движок SQLAlchemy."""
     try:
+        logger.debug(f"Attempting to create async engine for {database_url}")
         engine = create_async_engine(database_url)
         logger.info(f"Async engine created for database: {database_url}")
         return engine
@@ -19,6 +19,7 @@ def create_async_engine(database_url: str):
 
 def create_async_session(database_url: str) -> sessionmaker:
     """Создаёт фабрику асинхронных сессий SQLAlchemy."""
+    logger.debug("Creating async session factory")
     engine = create_async_engine(database_url)
     async_session = sessionmaker(
         engine,
@@ -31,6 +32,7 @@ def create_async_session(database_url: str) -> sessionmaker:
 async def get_user_values(session: AsyncSession, user_id: int) -> list[str]:
     """Получает список ценностей пользователя из базы данных."""
     try:
+        logger.debug(f"Retrieving values for user {user_id}")
         result = await session.execute(
             select(UserValue.value).where(UserValue.user_id == user_id)
         )
@@ -43,6 +45,7 @@ async def get_user_values(session: AsyncSession, user_id: int) -> list[str]:
 async def save_value_to_db(session: AsyncSession, user_id: int, value: str):
     """Сохраняет ценность пользователя в базу данных."""
     try:
+        logger.debug(f"Saving value '{value}' for user {user_id}")
         new_value = UserValue(user_id=user_id, value=value)
         session.add(new_value)
         await session.commit()
