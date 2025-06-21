@@ -1,4 +1,3 @@
-
 import logging
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
 from sqlalchemy.orm import sessionmaker
@@ -12,7 +11,6 @@ def create_async_engine(database_url: str):
     try:
         engine = create_async_engine(
             database_url,
-            echo=False,
             pool_pre_ping=True
         )
         logger.info(f"Async engine created for database: {database_url}")
