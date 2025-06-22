@@ -4,9 +4,9 @@ from functools import lru_cache
 import openai
 from typing import Tuple, Optional
 from concurrent.futures import ThreadPoolExecutor
-from amplitude import Amplitude, BaseEvent  # Исправлен импорт: Event → BaseEvent
-
+from amplitude import Amplitude, BaseEvent
 from database import save_value_to_db, AsyncSession
+import httpx
 
 logger = logging.getLogger(__name__)
 
@@ -15,8 +15,12 @@ executor = ThreadPoolExecutor(max_workers=1)
 
 class OpenAIService:
     def __init__(self, api_key: str, amplitude_api_key: str):
-        self.client = openai.AsyncOpenAI(api_key=api_key)
+        self.client = openai.AsyncOpenAI(
+            api_key=api_key,
+            http_client=httpx.AsyncClient()  # Обход ошибки proxies
+        )
         self.amplitude = Amplitude(amplitude_api_key)
+        self.vector_store_id: Optional[str] = None
 
     async def create_assistant(self) -> str:
         logger.info("create assistant used")
@@ -24,10 +28,11 @@ class OpenAIService:
             assistant = await self.client.beta.assistants.create(
                 name="Voice and Values Assistant",
                 instructions="""
-                Вы полезный голосовой ассистент. Ваша задача — помогать пользователю определять его ключевые ценности через диалог.
-                Начните с вопроса: 'Что для вас наиболее важное в жизни? Назови одну ценность (например, семья, свобода, успех).'
-                Если пользователь говорит 'добавить к ценностям [ценность]' или называет новую ценность, вызывайте save_value с этой ценностью.
-                Если ответ неясен, продолжайте задавать вопросы, такие как: 'Пожалуйста, назовите конкретную ценность.'
+                Вы полезный голосовой ассистент. Ваша задача — помогать пользователю определять его ключевые ценности через диалог и отвечать на вопросы о тревожности, используя информацию из документа в vector_store.
+                Для ценностей: начните с вопроса: 'Что для вас наиболее важное в жизни? Назови одну ценность (например, семья, свобода, успех).'
+                Если пользователь говорит 'добавить к ценностям [ценность]' или называет новую ценность, вызывайте save_value.
+                Если ответ неясен, задавайте уточняющие вопросы.
+                Для вопросов о тревожности: используйте file_search для получения ответа из документа.
                 Не вызывайте save_value, если ответ не является валидной ценностью.
                 Для голосовых сообщений преобразуйте текст в ответы, используя TTS.
                 """,
@@ -49,7 +54,8 @@ class OpenAIService:
                                 "required": ["value"]
                             }
                         }
-                    }
+                    },
+                    {"type": "file_search"}
                 ]
             )
             logger.info(f"Создан новый ассистент с ID: {assistant.id}")
@@ -70,6 +76,30 @@ class OpenAIService:
             return await self.create_assistant()
         except Exception as e:
             logger.error(f"Ошибка при проверке ассистента: {e}")
+            raise
+
+    async def update_assistant_with_file_search(self, assistant_id: str) -> None:
+        """Обновляет ассистента с file_search и vector_store_id."""
+        if not self.vector_store_id:
+            raise ValueError("Vector store ID is not set.")
+        try:
+            logger.debug(f"Updating assistant {assistant_id} with vector store {self.vector_store_id}")
+            assistant = await self.client.beta.assistants.update(
+                assistant_id=assistant_id,
+                tools=[{"type": "file_search"}, {"type": "function", "function": {
+                    "name": "save_value",
+                    "description": "Сохранить ценность",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {"value": {"type": "string"}},
+                        "required": ["value"]
+                    }
+                }}],
+                tool_resources={"file_search": {"vector_store_ids": [self.vector_store_id]}}
+            )
+            logger.info(f"Assistant {assistant.id} updated with vector store {self.vector_store_id}")
+        except Exception as e:
+            logger.error(f"Error updating assistant: {e}")
             raise
 
     @lru_cache(maxsize=100)
@@ -102,8 +132,27 @@ class OpenAIService:
         messages = await self.client.beta.threads.messages.list(thread_id=thread_id)
         for msg in messages.data:
             if msg.role == "assistant" and msg.content[0].type == "text":
-                return msg.content[0].text.value, None
+                response = msg.content[0].text.value
+                # Обработка file_citation
+                citations = []
+                for annotation in msg.content[0].text.annotations:
+                    if annotation.type == "file_citation":
+                        file_id = annotation.file_citation.file_id
+                        file_name = await self.get_file_name(file_id)
+                        citations.append(f"[Источник: {file_name}]")
+                if citations:
+                    response += "\n" + "\n".join(citations)
+                return response, None
         return None, None
+
+    async def get_file_name(self, file_id: str) -> str:
+        """Получает имя файла по его ID."""
+        try:
+            file = await self.client.files.retrieve(file_id)
+            return file.filename
+        except Exception as e:
+            logger.error(f"Ошибка при получении имени файла {file_id}: {e}")
+            return "Unknown File"
 
     async def handle_tool_outputs(self, thread_id: str, run) -> Tuple[Optional[str], Optional[str]]:
         logger.info(f"Статус requires_action, tool_calls: {run.required_action.submit_tool_outputs.tool_calls}")
@@ -167,7 +216,7 @@ class OpenAIService:
             logger.info(f"Определено настроение: {mood}")
             executor.submit(
                 self.amplitude.track,
-                BaseEvent(  # Исправлено: Event -> BaseEvent
+                BaseEvent(
                     event_type="mood_analyzed",
                     user_id=str(user_id),
                     event_properties={"mood": mood}
@@ -182,7 +231,7 @@ class OpenAIService:
         logger.info(f"Отправка события Amplitude: {event_type} для user_id: {user_id}")
         executor.submit(
             self.amplitude.track,
-            BaseEvent(  # Исправлено: Event -> BaseEvent
+            BaseEvent(
                 event_type=event_type,
                 user_id=user_id,
                 event_properties=event_properties or {}
