@@ -2,9 +2,11 @@ import logging
 import asyncio
 import os
 import requests
+from urllib.parse import urlparse
 from aiogram import Bot, Dispatcher
 from aiogram.fsm.storage.redis import RedisStorage
 from redis.asyncio import Redis
+from redis.asyncio.connection import parse_url
 from sqlalchemy.ext.asyncio import AsyncSession
 from config import config
 from database import init_db, Base
@@ -84,7 +86,10 @@ async def init_redis(redis_url: str) -> Redis:
     try:
         if not redis_url:
             raise ValueError("REDIS_URL is not set in environment variables")
-        logger.info(f"Attempting to connect to Redis with URL: {redis_url[:15]}...")  # Частичное логирование
+        logger.info(f"Attempting to connect to Redis with URL: {redis_url[:15]}...")
+        # Проверка парсинга URL
+        parsed_url = parse_url(redis_url)
+        logger.info(f"Parsed Redis URL: host={parsed_url.get('host')}, port={parsed_url.get('port')}, username={parsed_url.get('username')}")
         redis = Redis.from_url(redis_url, decode_responses=True)
         await redis.ping()
         logger.info("Successfully connected to Redis")
@@ -92,6 +97,14 @@ async def init_redis(redis_url: str) -> Redis:
     except Exception as e:
         logger.error(f"Failed to connect to Redis with URL {redis_url[:15]}...: {e}")
         raise
+
+# Проверка переменных окружения
+logger.info(f"Loaded REDIS_URL: {os.getenv('REDIS_URL')[:15]}...")
+logger.info(f"Loaded DATABASE_URL: {os.getenv('DATABASE_URL')[:15]}...")
+logger.info(f"Loaded TELEGRAM_BOT_TOKEN: {os.getenv('TELEGRAM_BOT_TOKEN')[:10]}...")
+logger.info(f"Loaded OPENAI_API_KEY: {os.getenv('OPENAI_API_KEY')[:10]}...")
+logger.info(f"Loaded ASSISTANT_ID: {os.getenv('ASSISTANT_ID')}")
+logger.info(f"Loaded AMPLITUDE_API_KEY: {os.getenv('AMPLITUDE_API_KEY')[:10]}...")
 
 # Инициализация бота
 try:
