@@ -1,151 +1,155 @@
-import os
 import logging
 import asyncio
-from io import BytesIO
-from typing import Optional
-
-from aiogram import Bot, Dispatcher, types, F
-from aiogram.filters import Command
-from aiogram.types import Message
-from aiogram.utils.keyboard import ReplyKeyboardBuilder
+import os
+import requests
+from urllib.parse import urlparse
+from aiogram import Bot, Dispatcher
+from aiogram.fsm.storage.redis import RedisStorage
+from redis.asyncio import Redis
+from redis.asyncio.connection import parse_url
+from sqlalchemy.ext.asyncio import AsyncSession
+from config import config
+from database import init_db, Base
+from services import OpenAIService
+from handlers import register_handlers
 import openai
-
-from config import config  # Импорт конфигурации из config.py
-
-# Инициализация клиента OpenAI
-client = openai.AsyncOpenAI(api_key=config.OPENAI_API_KEY)
-
-# Инициализация бота
-bot = Bot(token=config.TELEGRAM_BOT_TOKEN)
-dp = Dispatcher()
+import httpx
 
 # Логирование
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Функция для создания ассистента
-async def create_assistant():
+def sync_upload_file(file_path: str, api_key: str) -> str:
+    """Загружает файл в OpenAI через /files."""
     try:
-        assistant = await client.beta.assistants.create(
-            name="Voice Assistant",
-            instructions="Вы полезный голосовой ассистент, отвечающий на вопросы пользователей кратко и по делу.",
-            model="gpt-4o",
-            tools=[{"type": "code_interpreter"}]  # Опционально
-        )
-        logger.info(f"Создан новый ассистент с ID: {assistant.id}")
-        print(f"!!! ВАЖНО: Добавьте в .env следующий ASSISTANT_ID: {assistant.id}")
-        return assistant.id
+        if not os.path.exists(file_path):
+            raise FileNotFoundError(f"File {file_path} not found")
+        file_size = os.path.getsize(file_path)
+        if file_size == 0:
+            raise ValueError(f"File {file_path} is empty")
+        logger.debug(f"File {file_path} size: {file_size} bytes")
+        
+        url = "https://api.openai.com/v1/files"
+        headers = {
+            "Authorization": f"Bearer {api_key}",
+            "OpenAI-Beta": "assistants=v2"
+        }
+        with open(file_path, "rb") as file:
+            files = {
+                "file": (os.path.basename(file_path), file, "application/vnd.openxmlformats-officedocument.wordprocessingml.document")
+            }
+            data = {"purpose": "assistants"}
+            response = requests.post(url, headers=headers, files=files, data=data)
+            try:
+                response.raise_for_status()
+            except requests.exceptions.HTTPError as e:
+                logger.error(f"HTTP error uploading file: {e}, Response body: {response.text}")
+                raise
+            file_data = response.json()
+        file_id = file_data["id"]
+        logger.info(f"File uploaded with ID: {file_id}")
+        return file_id
     except Exception as e:
-        logger.error(f"Ошибка при создании ассистента: {e}")
+        logger.error(f"Error uploading file: {e}")
         raise
 
-# Проверка и создание ассистента, если ID недействителен
-async def verify_or_create_assistant():
+def sync_create_vector_store(file_id: str, api_key: str) -> str:
+    """Создаёт векторное хранилище с file_id через /vector_stores."""
     try:
-        assistant = await client.beta.assistants.retrieve(config.ASSISTANT_ID)
-        logger.info(f"Ассистент найден: {assistant.name}")
-        return config.ASSISTANT_ID
-    except openai.NotFoundError:
-        logger.warning(f"Ассистент с ID {config.ASSISTANT_ID} не найден. Создаём новый...")
-        new_assistant_id = await create_assistant()
-        # Обновляем config.ASSISTANT_ID (но .env нужно обновить вручную)
-        config.ASSISTANT_ID = new_assistant_id
-        logger.info(f"Используется новый ASSISTANT_ID: {new_assistant_id}")
-        return new_assistant_id
+        url = "https://api.openai.com/v1/vector_stores"
+        headers = {
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+            "OpenAI-Beta": "assistants=v2"
+        }
+        data = {
+            "name": "Anxiety Document Store",
+            "file_ids": [file_id]
+        }
+        response = requests.post(url, headers=headers, json=data)
+        try:
+            response.raise_for_status()
+        except requests.exceptions.HTTPError as e:
+            logger.error(f"HTTP error creating vector store: {e}, Response body: {response.text}")
+            raise
+        vector_store = response.json()
+        vector_store_id = vector_store["id"]
+        logger.info(f"Vector store created with ID: {vector_store_id}")
+        return vector_store_id
     except Exception as e:
-        logger.error(f"Ошибка при проверке ассистента: {e}")
+        logger.error(f"Error creating vector store: {e}")
         raise
 
-# Клавиатура
-def get_main_keyboard():
-    builder = ReplyKeyboardBuilder()
-    builder.button(text="Помощь")
-    builder.button(text="О боте")
-    return builder.as_markup(resize_keyboard=True)
-
-# Обработчики сообщений
-@dp.message(Command("start"))
-async def start_handler(message: Message):
-    await message.answer(
-        "Привет! Отправь голосовое сообщение, и я отвечу голосом!",
-        reply_markup=get_main_keyboard()
-    )
-
-@dp.message(F.text)
-async def text_handler(message: Message):
-    if message.text.lower() == "помощь":
-        await message.answer("Просто отправь голосовое сообщение с вопросом")
-    elif message.text.lower() == "о боте":
-        await message.answer("Я голосовой ассистент на OpenAI API")
-    else:
-        await message.answer("Используй голосовые сообщения")
-
-@dp.message(F.voice)
-async def voice_handler(message: Message):
+# Инициализация RedisStorage
+async def init_redis(redis_url: str) -> Redis:
+    """Инициализирует и проверяет подключение к Redis."""
     try:
-        # 1. Конвертация голоса в текст (Whisper API)
-        voice_file = await bot.get_file(message.voice.file_id)
-        voice_data = await bot.download_file(voice_file.file_path)
-        
-        transcript = await client.audio.transcriptions.create(
-            file=("voice.ogg", BytesIO(voice_data.read()), "audio/ogg"),
-            model="whisper-1"
-        )
-        user_question = transcript.text
-        await message.answer(f"🎤 Ваш вопрос: {user_question}")
-
-        # 2. Получение ответа через Assistant API
-        thread = await client.beta.threads.create()
-        await client.beta.threads.messages.create(
-            thread_id=thread.id,
-            role="user",
-            content=user_question
-        )
-        
-        run = await client.beta.threads.runs.create(
-            thread_id=thread.id,
-            assistant_id=config.ASSISTANT_ID
-        )
-        
-        while True:
-            run_status = await client.beta.threads.runs.retrieve(
-                thread_id=thread.id,
-                run_id=run.id
-            )
-            if run_status.status == "completed":
-                break
-            await asyncio.sleep(1)
-        
-        messages = await client.beta.threads.messages.list(thread_id=thread.id)
-        assistant_response = next(
-            m.content[0].text.value 
-            for m in messages.data 
-            if m.role == "assistant"
-        )
-
-        # 3. Озвучка ответа (TTS API)
-        speech = await client.audio.speech.create(
-            model="tts-1",
-            voice="alloy",
-            input=assistant_response
-        )
-        
-        await message.answer_voice(
-            types.BufferedInputFile(
-                (await speech.aread()),
-                filename="response.mp3"
-            )
-        )
-        await message.answer(f"🤖 Ответ: {assistant_response}")
-
+        if not redis_url:
+            raise ValueError("REDIS_URL is not set in environment variables")
+        logger.info(f"Attempting to connect to Redis with URL: {redis_url[:15]}...")
+        # Проверка парсинга URL
+        parsed_url = parse_url(redis_url)
+        logger.info(f"Parsed Redis URL: host={parsed_url.get('host')}, port={parsed_url.get('port')}, username={parsed_url.get('username')}")
+        redis = Redis.from_url(redis_url, decode_responses=True)
+        await redis.ping()
+        logger.info("Successfully connected to Redis")
+        return redis
     except Exception as e:
-        logger.error(f"Ошибка: {e}", exc_info=True)
-        await message.answer("Ошибка обработки запроса")
+        logger.error(f"Failed to connect to Redis with URL {redis_url[:15]}...: {e}")
+        raise
+
+# Проверка переменных окружения
+logger.info(f"Loaded REDIS_URL: {os.getenv('REDIS_URL')[:15]}...")
+logger.info(f"Loaded DATABASE_URL: {os.getenv('DATABASE_URL')[:15]}...")
+logger.info(f"Loaded TELEGRAM_BOT_TOKEN: {os.getenv('TELEGRAM_BOT_TOKEN')[:10]}...")
+logger.info(f"Loaded OPENAI_API_KEY: {os.getenv('OPENAI_API_KEY')[:10]}...")
+logger.info(f"Loaded ASSISTANT_ID: {os.getenv('ASSISTANT_ID')}")
+logger.info(f"Loaded AMPLITUDE_API_KEY: {os.getenv('AMPLITUDE_API_KEY')[:10]}...")
+
+# Инициализация бота
+try:
+    redis = asyncio.run(init_redis(config.REDIS_URL))
+except Exception as e:
+    logger.critical(f"Cannot start bot: Redis initialization failed: {e}")
+    raise
+storage = RedisStorage(redis=redis)
+bot = Bot(token=config.TELEGRAM_BOT_TOKEN)
+dp = Dispatcher(storage=storage)
+
+# Инициализация базы данных
+engine, async_session = init_db(config.DATABASE_URL)
+
+# Инициализация сервиса OpenAI
+openai_service = OpenAIService(config.OPENAI_API_KEY, config.AMPLITUDE_API_KEY)
 
 async def main():
-    # Проверяем или создаём ассистента перед запуском бота
-    await verify_or_create_assistant()
-    await dp.start_polling(bot)
+    try:
+        # Создание таблиц базы данных
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+        
+        # Проверка или создание ассистента
+        assistant_id = await openai_service.verify_or_create_assistant(config.ASSISTANT_ID)
+        if assistant_id != config.ASSISTANT_ID:
+            logger.info(f"Обновлён ASSISTANT_ID с {config.ASSISTANT_ID} на {assistant_id}")
+
+        # Загрузка файла и создание vector_store
+        file_id = sync_upload_file("Anxiety.docx", config.OPENAI_API_KEY)
+        vector_store_id = sync_create_vector_store(file_id, config.OPENAI_API_KEY)
+        openai_service.vector_store_id = vector_store_id
+        await openai_service.update_assistant_with_file_search(assistant_id)
+
+        # Регистрация обработчиков
+        register_handlers(dp, bot, openai_service, assistant_id, async_session)
+
+        # Запуск бота
+        logger.info("Starting bot polling")
+        await dp.start_polling(bot, drop_pending_updates=True)
+    except Exception as e:
+        logger.error(f"Failed to start bot: {e}")
+        raise
+    finally:
+        await redis.aclose()
 
 if __name__ == "__main__":
     asyncio.run(main())
