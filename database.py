@@ -11,7 +11,7 @@ def init_db(database_url: str):
     engine = create_async_engine(
         database_url,
         echo=True,
-        pool_pre_ping=True,  # Добавлено
+        pool_pre_ping=True,
         connect_args={"server_settings": {"application_name": "voice_values_bot"}}
     )
     async_session = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
