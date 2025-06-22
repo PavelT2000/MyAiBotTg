@@ -79,10 +79,20 @@ def sync_create_vector_store(file_id: str, api_key: str) -> str:
         raise
 
 # Инициализация RedisStorage
-redis = Redis.from_url(config.REDIS_URL)
-storage = RedisStorage(redis=redis)
+async def init_redis(redis_url: str) -> Redis:
+    """Инициализирует и проверяет подключение к Redis."""
+    try:
+        redis = Redis.from_url(redis_url)
+        await redis.ping()  # Проверка подключения
+        logger.info("Successfully connected to Redis")
+        return redis
+    except Exception as e:
+        logger.error(f"Failed to connect to Redis: {e}")
+        raise
 
 # Инициализация бота
+redis = asyncio.run(init_redis(config.REDIS_URL))
+storage = RedisStorage(redis=redis)
 bot = Bot(token=config.TELEGRAM_BOT_TOKEN)
 dp = Dispatcher(storage=storage)
 
