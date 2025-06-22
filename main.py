@@ -1,3 +1,4 @@
+```python
 import logging
 import asyncio
 import os
@@ -82,16 +83,23 @@ def sync_create_vector_store(file_id: str, api_key: str) -> str:
 async def init_redis(redis_url: str) -> Redis:
     """Инициализирует и проверяет подключение к Redis."""
     try:
-        redis = Redis.from_url(redis_url)
-        await redis.ping()  # Проверка подключения
+        if not redis_url:
+            raise ValueError("REDIS_URL is not set in environment variables")
+        logger.info(f"Attempting to connect to Redis with URL: {redis_url[:15]}...")  # Частичное логирование
+        redis = Redis.from_url(redis_url, decode_responses=True)
+        await redis.ping()
         logger.info("Successfully connected to Redis")
         return redis
     except Exception as e:
-        logger.error(f"Failed to connect to Redis: {e}")
+        logger.error(f"Failed to connect to Redis with URL {redis_url[:15]}...: {e}")
         raise
 
 # Инициализация бота
-redis = asyncio.run(init_redis(config.REDIS_URL))
+try:
+    redis = asyncio.run(init_redis(config.REDIS_URL))
+except Exception as e:
+    logger.critical(f"Cannot start bot: Redis initialization failed: {e}")
+    raise
 storage = RedisStorage(redis=redis)
 bot = Bot(token=config.TELEGRAM_BOT_TOKEN)
 dp = Dispatcher(storage=storage)
