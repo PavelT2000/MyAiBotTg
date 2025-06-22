@@ -17,10 +17,9 @@ import httpx
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-def sync_create_vector_store(file_path: str, api_key: str) -> str:
-    """Создаёт векторное хранилище через HTTP-запрос к OpenAI API."""
+def sync_upload_file(file_path: str, api_key: str) -> str:
+    """Загружает файл в OpenAI через /files."""
     try:
-        logger.info(f"OpenAI library version: {openai.__version__}, httpx version: {httpx.__version__}")
         if not os.path.exists(file_path):
             raise FileNotFoundError(f"File {file_path} not found")
         file_size = os.path.getsize(file_path)
@@ -28,7 +27,7 @@ def sync_create_vector_store(file_path: str, api_key: str) -> str:
             raise ValueError(f"File {file_path} is empty")
         logger.debug(f"File {file_path} size: {file_size} bytes")
         
-        url = "https://api.openai.com/v1/vector_stores"
+        url = "https://api.openai.com/v1/files"
         headers = {
             "Authorization": f"Bearer {api_key}",
             "OpenAI-Beta": "assistants=v2"
@@ -37,14 +36,41 @@ def sync_create_vector_store(file_path: str, api_key: str) -> str:
             files = {
                 "file": (os.path.basename(file_path), file, "application/vnd.openxmlformats-officedocument.wordprocessingml.document")
             }
-            data = {"name": "Anxiety Document Store"}
+            data = {"purpose": "assistants"}
             response = requests.post(url, headers=headers, files=files, data=data)
             try:
                 response.raise_for_status()
             except requests.exceptions.HTTPError as e:
-                logger.error(f"HTTP error: {e}, Response body: {response.text}")
+                logger.error(f"HTTP error uploading file: {e}, Response body: {response.text}")
                 raise
-            vector_store = response.json()
+            file_data = response.json()
+        file_id = file_data["id"]
+        logger.info(f"File uploaded with ID: {file_id}")
+        return file_id
+    except Exception as e:
+        logger.error(f"Error uploading file: {e}")
+        raise
+
+def sync_create_vector_store(file_id: str, api_key: str) -> str:
+    """Создаёт векторное хранилище с file_id через /vector_stores."""
+    try:
+        url = "https://api.openai.com/v1/vector_stores"
+        headers = {
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+            "OpenAI-Beta": "assistants=v2"
+        }
+        data = {
+            "name": "Anxiety Document Store",
+            "file_ids": [file_id]
+        }
+        response = requests.post(url, headers=headers, json=data)
+        try:
+            response.raise_for_status()
+        except requests.exceptions.HTTPError as e:
+            logger.error(f"HTTP error creating vector store: {e}, Response body: {response.text}")
+            raise
+        vector_store = response.json()
         vector_store_id = vector_store["id"]
         logger.info(f"Vector store created with ID: {vector_store_id}")
         return vector_store_id
@@ -77,10 +103,11 @@ async def main():
         if assistant_id != config.ASSISTANT_ID:
             logger.info(f"Обновлён ASSISTANT_ID с {config.ASSISTANT_ID} на {assistant_id}")
 
-        # Создание vector_store
-        vector_store_id = sync_create_vector_store("Anxiety.docx", config.OPENAI_API_KEY)
+        # Загрузка файла и создание vector_store
+        file_id = sync_upload_file("Anxiety.docx", config.OPENAI_API_KEY)
+        vector_store_id = sync_create_vector_store(file_id, config.OPENAI_API_KEY)
         openai_service.vector_store_id = vector_store_id
-        await openai_service.update_assistant_with_file_search()
+        await openai_service.update_assistant_with_file_search(assistant_id)
 
         # Регистрация обработчиков
         register_handlers(dp, bot, openai_service, assistant_id, async_session)
@@ -92,7 +119,7 @@ async def main():
         logger.error(f"Failed to start bot: {e}")
         raise
     finally:
-        await redis.close()
+        await redis.aclose()
 
 if __name__ == "__main__":
     asyncio.run(main())
