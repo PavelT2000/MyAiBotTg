@@ -10,17 +10,18 @@ import httpx
 
 logger = logging.getLogger(__name__)
 
-# Создаём единый ThreadPoolExecutor для Amplitude
+# Создаём ThreadPoolExecutor для Amplitude
 executor = ThreadPoolExecutor(max_workers=1)
 
 class OpenAIService:
     def __init__(self, api_key: str, amplitude_api_key: str):
         self.client = openai.AsyncOpenAI(
             api_key=api_key,
-            http_client=httpx.AsyncClient()  # Обход ошибки proxies
+            http_client=httpx.AsyncClient()
         )
         self.amplitude = Amplitude(amplitude_api_key)
         self.vector_store_id: Optional[str] = None
+        self.assistant_id: Optional[str] = None
 
     async def create_assistant(self) -> str:
         logger.info("create assistant used")
@@ -28,13 +29,17 @@ class OpenAIService:
             assistant = await self.client.beta.assistants.create(
                 name="Voice and Values Assistant",
                 instructions="""
-                Вы полезный голосовой ассистент. Ваша задача — помогать пользователю определять его ключевые ценности через диалог и отвечать на вопросы о тревожности, используя информацию из документа в vector_store.
-                Для ценностей: начните с вопроса: 'Что для вас наиболее важное в жизни? Назови одну ценность (например, семья, свобода, успех).'
-                Если пользователь говорит 'добавить к ценностям [ценность]' или называет новую ценность, вызывайте save_value.
-                Если ответ неясен, задавайте уточняющие вопросы.
-                Для вопросов о тревожности: используйте file_search для получения ответа из документа.
-                Не вызывайте save_value, если ответ не является валидной ценностью.
-                Для голосовых сообщений преобразуйте текст в ответы, используя TTS.
+                Вы полезный голосовой ассистент. Ваши задачи:
+                1. Помогать пользователю определять ключевые ценности через диалог.
+                   - Начните с вопроса: 'Что для вас наиболее важное в жизни? Назови одну ценность (например, семья, свобода, успех).'
+                   - Если пользователь называет ценность (например, 'добавить к ценностям [ценность]'), вызывайте save_value.
+                   - Если ответ неясен, задавайте уточняющие вопросы, например: 'Пожалуйста, назовите конкретную ценность.'
+                   - Не вызывайте save_value для невалидных ценностей.
+                2. Отвечать на вопросы о тревожности, используя file_search с документом в vector_store.
+                   - Если вопрос связан с тревожностью, предоставьте точный ответ на основе документа.
+                   - Включите ссылку на источник (file_citation) в ответе.
+                3. Для голосовых сообщений преобразуйте текст в ответы с помощью TTS (модель tts-1, голос alloy).
+                Всегда отвечайте на русском языке, будьте дружелюбны и понятны.
                 """,
                 model="gpt-4o",
                 tools=[
@@ -42,7 +47,7 @@ class OpenAIService:
                         "type": "function",
                         "function": {
                             "name": "save_value",
-                            "description": "Сохранить определённую ценность пользователя в базе данных",
+                            "description": "Сохранить ценность пользователя в базе данных",
                             "parameters": {
                                 "type": "object",
                                 "properties": {
@@ -60,6 +65,7 @@ class OpenAIService:
             )
             logger.info(f"Создан новый ассистент с ID: {assistant.id}")
             print(f"!!! ВАЖНО: Добавьте в .env следующий ASSISTANT_ID: {assistant.id}")
+            self.assistant_id = assistant.id
             return assistant.id
         except Exception as e:
             logger.error(f"Ошибка при создании ассистента: {e}")
@@ -68,8 +74,9 @@ class OpenAIService:
     async def verify_or_create_assistant(self, assistant_id: str) -> str:
         logger.info("verify or create assistant handler used")
         try:
-            await self.client.beta.assistants.retrieve(assistant_id)
-            logger.info(f"Ассистент найден: Voice and Values Assistant")
+            assistant = await self.client.beta.assistants.retrieve(assistant_id)
+            logger.info(f"Ассистент найден: {assistant.name}")
+            self.assistant_id = assistant_id
             return assistant_id
         except openai.NotFoundError:
             logger.warning(f"Ассистент с ID {assistant_id} не найден. Создаём новый...")
@@ -86,17 +93,24 @@ class OpenAIService:
             logger.debug(f"Updating assistant {assistant_id} with vector store {self.vector_store_id}")
             assistant = await self.client.beta.assistants.update(
                 assistant_id=assistant_id,
-                tools=[{"type": "file_search"}, {"type": "function", "function": {
-                    "name": "save_value",
-                    "description": "Сохранить ценность",
-                    "parameters": {
-                        "type": "object",
-                        "properties": {"value": {"type": "string"}},
-                        "required": ["value"]
-                    }
-                }}],
+                tools=[
+                    {
+                        "type": "function",
+                        "function": {
+                            "name": "save_value",
+                            "description": "Сохранить ценность",
+                            "parameters": {
+                                "type": "object",
+                                "properties": {"value": {"type": "string"}},
+                                "required": ["value"]
+                            }
+                        }
+                    },
+                    {"type": "file_search"}
+                ],
                 tool_resources={"file_search": {"vector_store_ids": [self.vector_store_id]}}
             )
+            self.assistant_id = assistant.id
             logger.info(f"Assistant {assistant.id} updated with vector store {self.vector_store_id}")
         except Exception as e:
             logger.error(f"Error updating assistant: {e}")
@@ -111,7 +125,7 @@ class OpenAIService:
             response = await self.client.chat.completions.create(
                 model="gpt-4o-mini",
                 messages=[
-                    {"role": "system", "content": "Вы валидатор ценностей. Верните 'true' для корректных ценностей (например, 'семья', 'свобода', 'успех'), и 'false' для некорректных (пустые, бессмысленные или бред). Ответьте только 'true' или 'false'."},
+                    {"role": "system", "content": "Вы валидатор ценностей. Верните 'true' для корректных ценностей (например, 'семья', 'свобода', 'успех'), и 'false' для некорректных. Ответьте только 'true' или 'false'."},
                     {"role": "user", "content": value}
                 ],
                 max_tokens=1
@@ -133,7 +147,6 @@ class OpenAIService:
         for msg in messages.data:
             if msg.role == "assistant" and msg.content[0].type == "text":
                 response = msg.content[0].text.value
-                # Обработка file_citation
                 citations = []
                 for annotation in msg.content[0].text.annotations:
                     if annotation.type == "file_citation":
